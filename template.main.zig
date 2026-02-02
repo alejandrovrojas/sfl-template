@@ -96,6 +96,14 @@ pub const Lexer = struct {
         };
     }
 
+    inline fn is_whitespace(ch: u8) bool {
+    	return (ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r');
+    }
+
+    inline fn is_keyword_boundary(ch: u8) bool {
+        return is_whitespace(ch) or ch == '}';
+    }
+
     inline fn is_alpha(ch: u8) bool {
         return (ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z') or ch == '_';
     }
@@ -135,7 +143,7 @@ pub const Lexer = struct {
 
     pub fn tokenize_lexeme(self: *Lexer) Token {
         while (self.current_ch()) |ch| {
-            if (ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r') {
+            if (is_whitespace(ch)) {
                 self.advance_ch();
             } else {
                 break;
@@ -568,8 +576,8 @@ pub const Lexer = struct {
 
                     else => {
                         // undefined
-                        if (ch == 'u' and
-                            self.cursor + 9 <= self.input.len and
+                        if (self.cursor + 10 <= self.input.len and
+                            self.input[self.cursor]     == 'u' and
                             self.input[self.cursor + 1] == 'n' and
                             self.input[self.cursor + 2] == 'd' and
                             self.input[self.cursor + 3] == 'e' and
@@ -577,7 +585,8 @@ pub const Lexer = struct {
                             self.input[self.cursor + 5] == 'i' and
                             self.input[self.cursor + 6] == 'n' and
                             self.input[self.cursor + 7] == 'e' and
-                            self.input[self.cursor + 8] == 'd')
+                            self.input[self.cursor + 8] == 'd' and
+                            is_keyword_boundary(self.input[self.cursor + 9]))
                         {
                             inline for (0..9) |_| {
                                 self.advance_ch();
@@ -588,11 +597,12 @@ pub const Lexer = struct {
                         }
 
                         // null
-                        if (ch == 'n' and
-                            self.cursor + 4 <= self.input.len and
+                        if (self.cursor + 5 <= self.input.len and
+                        	self.input[self.cursor]     == 'n' and
                             self.input[self.cursor + 1] == 'u' and
                             self.input[self.cursor + 2] == 'l' and
-                            self.input[self.cursor + 3] == 'l')
+                            self.input[self.cursor + 3] == 'l' and
+                            is_keyword_boundary(self.input[self.cursor + 4]))
                         {
                             inline for (0..4) |_| {
                                 self.advance_ch();
@@ -603,11 +613,12 @@ pub const Lexer = struct {
                         }
 
                         // true
-                        if (ch == 't' and
-                            self.cursor + 4 <= self.input.len and
+                        if (self.cursor + 5 <= self.input.len and
+                            self.input[self.cursor]     == 't' and
                             self.input[self.cursor + 1] == 'r' and
                             self.input[self.cursor + 2] == 'u' and
-                            self.input[self.cursor + 3] == 'e')
+                            self.input[self.cursor + 3] == 'e' and
+                            is_keyword_boundary(self.input[self.cursor + 4]))
                         {
                             inline for (0..4) |_| {
                                 self.advance_ch();
@@ -618,12 +629,13 @@ pub const Lexer = struct {
                         }
 
                         // false
-                        if (ch == 'f' and
-                            self.cursor + 5 <= self.input.len and
+                        if (self.cursor + 6 <= self.input.len and
+                        	self.input[self.cursor]     == 'f' and
                             self.input[self.cursor + 1] == 'a' and
                             self.input[self.cursor + 2] == 'l' and
                             self.input[self.cursor + 3] == 's' and
-                            self.input[self.cursor + 4] == 'e')
+                            self.input[self.cursor + 4] == 'e' and
+                            is_keyword_boundary(self.input[self.cursor + 5]))
                         {
                             inline for (0..5) |_| {
                                 self.advance_ch();
@@ -634,10 +646,11 @@ pub const Lexer = struct {
                         }
 
                         // for
-                        if (ch == 'f' and
-                            self.cursor + 3 <= self.input.len and
+                        if (self.cursor + 4 <= self.input.len and
+                        	self.input[self.cursor]     == 'f' and
                             self.input[self.cursor + 1] == 'o' and
-                            self.input[self.cursor + 2] == 'r')
+                            self.input[self.cursor + 2] == 'r' and
+                            is_keyword_boundary(self.input[self.cursor + 3]))
                         {
                             inline for (0..3) |_| {
                                 self.advance_ch();
@@ -648,9 +661,10 @@ pub const Lexer = struct {
                         }
 
                         // in
-                        if (ch == 'i' and
-                            self.cursor + 2 <= self.input.len and
-                            self.input[self.cursor + 1] == 'n')
+                        if (self.cursor + 3 <= self.input.len and
+                            self.input[self.cursor]     == 'i' and
+                            self.input[self.cursor + 1] == 'n' and
+                            is_keyword_boundary(self.input[self.cursor + 2]))
                         {
                             inline for (0..2) |_| {
                                 self.advance_ch();
@@ -661,9 +675,11 @@ pub const Lexer = struct {
                         }
 
                         // if
-                        if (ch == 'i' and
-                            self.cursor + 2 <= self.input.len and
-                            self.input[self.cursor + 1] == 'f')
+                        if (self.cursor + 3 <= self.input.len and
+                            self.input[self.cursor]     == 'i' and
+                            self.input[self.cursor + 1] == 'f' and
+                            is_keyword_boundary(self.input[self.cursor + 2])
+                        )
                         {
                             inline for (0..2) |_| {
                                 self.advance_ch();
@@ -675,12 +691,14 @@ pub const Lexer = struct {
 
                         // {else}
                         if (self.cursor + 5 <= self.input.len and
-                            self.input[self.cursor + 1] == 'e' and
-                            self.input[self.cursor + 2] == 'l' and
-                            self.input[self.cursor + 3] == 's' and
-                            self.input[self.cursor + 4] == 'e')
+                            self.input[self.cursor]     == 'e' and
+                            self.input[self.cursor + 1] == 'l' and
+                            self.input[self.cursor + 2] == 's' and
+                            self.input[self.cursor + 3] == 'e' and
+                            is_keyword_boundary(self.input[self.cursor + 4])
+                        )
                         {
-                            inline for (0..5) |_| {
+                            inline for (0..4) |_| {
                                 self.advance_ch();
                             }
 
@@ -688,16 +706,17 @@ pub const Lexer = struct {
                             break;
                         }
 
-                        // {switch}
+                        // switch
                         if (self.cursor + 7 <= self.input.len and
-                            self.input[self.cursor + 1] == 's' and
-                            self.input[self.cursor + 2] == 'w' and
-                            self.input[self.cursor + 3] == 'i' and
-                            self.input[self.cursor + 4] == 't' and
-                            self.input[self.cursor + 5] == 'c' and
-                            self.input[self.cursor + 6] == 'h')
+                            self.input[self.cursor]     == 's' and
+                            self.input[self.cursor + 1] == 'w' and
+                            self.input[self.cursor + 2] == 'i' and
+                            self.input[self.cursor + 3] == 't' and
+                            self.input[self.cursor + 4] == 'c' and
+                            self.input[self.cursor + 5] == 'h' and
+                            is_keyword_boundary(self.input[self.cursor + 6]))
                         {
-                            inline for (0..7) |_| {
+                            inline for (0..6) |_| {
                                 self.advance_ch();
                             }
 
@@ -705,14 +724,15 @@ pub const Lexer = struct {
                             break;
                         }
 
-                        // {case}
+                        // case
                         if (self.cursor + 5 <= self.input.len and
-                            self.input[self.cursor + 1] == 'c' and
-                            self.input[self.cursor + 2] == 'a' and
-                            self.input[self.cursor + 3] == 's' and
-                            self.input[self.cursor + 4] == 'e')
+                            self.input[self.cursor]     == 'c' and
+                            self.input[self.cursor + 1] == 'a' and
+                            self.input[self.cursor + 2] == 's' and
+                            self.input[self.cursor + 3] == 'e' and
+                            is_keyword_boundary(self.input[self.cursor + 4]))
                         {
-                            inline for (0..5) |_| {
+                            inline for (0..4) |_| {
                                 self.advance_ch();
                             }
 
@@ -720,17 +740,18 @@ pub const Lexer = struct {
                             break;
                         }
 
-                        // {default}
+                        // default
                         if (self.cursor + 8 <= self.input.len and
-                            self.input[self.cursor + 1] == 'd' and
-                            self.input[self.cursor + 2] == 'e' and
-                            self.input[self.cursor + 3] == 'f' and
-                            self.input[self.cursor + 4] == 'a' and
-                            self.input[self.cursor + 5] == 'u' and
-                            self.input[self.cursor + 6] == 'l' and
-                            self.input[self.cursor + 7] == 't')
+                            self.input[self.cursor]     == 'd' and
+                            self.input[self.cursor + 1] == 'e' and
+                            self.input[self.cursor + 2] == 'f' and
+                            self.input[self.cursor + 3] == 'a' and
+                            self.input[self.cursor + 4] == 'u' and
+                            self.input[self.cursor + 5] == 'l' and
+                            self.input[self.cursor + 6] == 't' and
+                            is_keyword_boundary(self.input[self.cursor + 7]))
                         {
-                            inline for (0..8) |_| {
+                            inline for (0..7) |_| {
                                 self.advance_ch();
                             }
 
@@ -894,10 +915,18 @@ pub const ParseError = error{
     UnexpectedEndOfInput,
     UnsupportedExpression,
     OutOfMemory,
+    // Block parsing errors
+    MissingBlockEnd,
+    MissingIfEnd,
+    MissingElseEnd,
+    UnmatchedElse,
+    NestedBlockError,
+    InvalidBlockStructure,
 };
 
 pub const NodeType = enum {
     program,
+    block,
     text,
     comment,
     block_if,
@@ -918,6 +947,7 @@ pub const NodeType = enum {
 
 pub const Node = union(NodeType) {
     program:         Program,
+    block:           Block,
     text:            Text,
     comment:         Comment,
     block_if:        If,
@@ -933,7 +963,11 @@ pub const Node = union(NodeType) {
 };
 
 pub const Program = struct {
-    nodes: []Node,
+    root: Block,
+};
+
+pub const Block = struct {
+    body: []Node,
 };
 
 pub const Comment = struct {
@@ -946,8 +980,8 @@ pub const Text = struct {
 
 pub const If = struct {
     condition: []Token,
-    consequent: []Node,
-    alternate: []Node
+    consequent: Block,
+    alternate: ?*Node
 };
 
 // pub const LiteralString = struct {
@@ -1035,12 +1069,36 @@ pub const Parser = struct {
         }
     }
 
-    fn advance_token_if_current(self: *Parser, expected_type: TokenType) void {
+    fn expect_token(self: *Parser, expected_type: TokenType) ParseError!void {
+        const token = self.current_token() orelse {
+            return ParseError.UnexpectedEndOfInput;
+        };
+
+        if (token.type != expected_type) {
+            return ParseError.UnexpectedToken;
+        }
+
+        self.advance_token();
+    }
+
+    fn is_current_token(self: *Parser, token_type: TokenType) bool {
         if (self.current_token()) |token| {
-            if (token.type == expected_type) {
-                self.advance_token();
+            return token.type == token_type;
+        }
+
+        return false;
+    }
+
+    fn is_current_token_any(self: *Parser, token_types: []const TokenType) bool {
+        if (self.current_token()) |token| {
+            for (token_types) |token_type| {
+                if (token.type == token_type) {
+                    return true;
+                }
             }
         }
+
+        return false;
     }
 
     fn parse_text(_: *Parser, token: Token) Node {
@@ -1060,8 +1118,77 @@ pub const Parser = struct {
     }
 
     fn parse_if_block(self: *Parser) ParseError!Node {
-        self.advance_token_if_current(.if_start);
+        return self.parse_if_sequence(false);
+    }
 
+    fn parse_if_sequence(self: *Parser, is_nested: bool) ParseError!Node {
+        try self.expect_token(.if_start);
+
+        const condition = try self.parse_if_condition();
+
+        try self.expect_token(.expr_end);
+
+        const end_tokens = [_]TokenType{
+            .else_start,
+            .if_end
+        };
+
+        const consequent = Block{
+            .body = try self.parse_until(&end_tokens)
+        };
+
+        var alternate: ?*Node = null;
+
+        if (self.is_current_token(.expr_start)) {
+            const next = self.peek_token();
+
+            if (next) |next_token| {
+                if (next_token.type == .else_start) {
+                    self.advance_token();
+                    alternate = try self.allocator.create(Node);
+                    alternate.?.* = try self.parse_else_block();
+                }
+            }
+        }
+
+        if (!is_nested) {
+            try self.expect_token(.expr_start);
+            try self.expect_token(.if_end);
+            try self.expect_token(.expr_end);
+        }
+
+        return Node{
+            .block_if = If{
+                .condition = condition,
+                .consequent = consequent,
+                .alternate = alternate,
+            },
+        };
+    }
+
+    fn parse_else_block(self: *Parser) ParseError!Node {
+        try self.expect_token(.else_start);
+
+        if (self.is_current_token(.if_start)) {
+            return try self.parse_if_sequence(true);
+        }
+
+        try self.expect_token(.expr_end);
+
+        const end_tokens = [_]TokenType{
+            .if_end
+        };
+
+        const body_nodes = try self.parse_until(&end_tokens);
+
+        return Node{
+            .block = Block{
+                .body = body_nodes,
+            },
+        };
+    }
+
+    fn parse_if_condition(self: *Parser) ParseError![]Token {
         var condition_tokens = std.ArrayList(Token){};
 
         while (self.current_token()) |token| {
@@ -1073,32 +1200,28 @@ pub const Parser = struct {
             self.advance_token();
         }
 
-        self.advance_token_if_current(.expr_end);
+        return try condition_tokens.toOwnedSlice(self.allocator);
+    }
 
-        var consequent_nodes = std.ArrayList(Node){};
+    fn parse_until(self: *Parser, end_tokens: []const TokenType) ParseError![]Node {
+        var nodes = std.ArrayList(Node){};
 
-        while (self.current_token()) |token| {
-            if (token.type == .expr_start) {
-                break;
+        while (self.current_token()) |_| {
+            const next = self.peek_token();
+
+            if (next) |next_token| {
+                for (end_tokens) |end_token| {
+                    if (next_token.type == end_token) {
+                        return try nodes.toOwnedSlice(self.allocator);
+                    }
+                }
             }
 
             const node = try self.parse_statement();
-            try consequent_nodes.append(self.allocator, node);
+            try nodes.append(self.allocator, node);
         }
 
-        self.advance_token_if_current(.expr_start);
-        self.advance_token_if_current(.if_end);
-        self.advance_token_if_current(.expr_end);
-
-        var alternate_nodes = std.ArrayList(Node){};
-
-        return Node{
-            .block_if = If{
-                .condition  = try condition_tokens.toOwnedSlice(self.allocator),
-                .consequent = try consequent_nodes.toOwnedSlice(self.allocator),
-                .alternate  = try alternate_nodes.toOwnedSlice(self.allocator),
-            },
-        };
+        return ParseError.UnexpectedEndOfInput;
     }
 
     fn parse_statement(self: *Parser) ParseError!Node {
@@ -1137,6 +1260,11 @@ pub const Parser = struct {
                             return try self.parse_if_block();
                         },
 
+                        .else_start => {
+                            self.advance_token();
+                            return try self.parse_else_block();
+                        },
+
                         else => {
                             self.advance_token();
                             return ParseError.UnsupportedExpression;
@@ -1150,6 +1278,7 @@ pub const Parser = struct {
 
             else => {
                 self.advance_token();
+                std.debug.print("{}\n", .{token.type});
                 return ParseError.UnexpectedToken;
             },
         }
@@ -1165,7 +1294,9 @@ pub const Parser = struct {
 
         return Node{
             .program = Program{
-                .nodes = try nodes.toOwnedSlice(self.allocator)
+                .root = Block{
+                    .body = try nodes.toOwnedSlice(self.allocator)
+                }
             },
         };
     }
@@ -1181,10 +1312,12 @@ pub fn main() void {
     const allocator = arena.allocator();
 
     const input =
-        \\// test comment
-        \\<div>Hello world</div>
-        \\{if condition}
-        \\   <p>Conditional text</p>
+        \\{if 2}
+        \\   <p>if block</p>
+        \\{else if 2}
+        \\   <p>else if block</p>
+        \\{else}
+        \\   <p>else block</p>
         \\{/if}
     ;
 
@@ -1194,6 +1327,15 @@ pub fn main() void {
         std.debug.print("Lexer error: {}\n", .{err});
         return;
     };
+
+    for (tokens) |token| {
+        std.debug.print("{:>2}:{:<5} {s:<15} {s}\n", .{
+            token.position.line,
+            token.position.column,
+            @tagName(token.type),
+            token.value,
+        });
+    }
 
     var parser = Parser.init(tokens, allocator);
 
@@ -1215,6 +1357,36 @@ pub fn main() void {
 
         ParseError.OutOfMemory => {
             std.debug.print("Parse error: Out of memory\n", .{});
+            return;
+        },
+
+        ParseError.MissingBlockEnd => {
+            std.debug.print("Parse error: Missing block end tag\n", .{});
+            return;
+        },
+
+        ParseError.MissingIfEnd => {
+            std.debug.print("Parse error: Missing if end tag\n", .{});
+            return;
+        },
+
+        ParseError.MissingElseEnd => {
+            std.debug.print("Parse error: Missing else end tag\n", .{});
+            return;
+        },
+
+        ParseError.UnmatchedElse => {
+            std.debug.print("Parse error: Unmatched else block\n", .{});
+            return;
+        },
+
+        ParseError.NestedBlockError => {
+            std.debug.print("Parse error: Invalid block nesting\n", .{});
+            return;
+        },
+
+        ParseError.InvalidBlockStructure => {
+            std.debug.print("Parse error: Invalid block structure\n", .{});
             return;
         },
     };
