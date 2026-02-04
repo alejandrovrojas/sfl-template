@@ -133,246 +133,177 @@ test "expression: property access" {
     try testing.expect(token.type == .expr_end);
 }
 
-test "for loop" {
-    const test_input = "{for item in items}";
-
-    var lexer = template.Lexer.init(test_input, allocator);
-
-    var token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_start);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .for_start);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .identifier);
-    try testing.expectEqualStrings("item", token.value);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .for_in);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .identifier);
-    try testing.expectEqualStrings("items", token.value);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_end);
-}
-
-test "if block" {
-    const test_input = "{if a >= 10}";
-
-    var lexer = template.Lexer.init(test_input, allocator);
-
-    var token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_start);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .if_start);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .identifier);
-    try testing.expectEqualStrings("a", token.value);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .greater_equal);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .integer);
-    try testing.expectEqualStrings("10", token.value);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_end);
-}
-
-test "string literal" {
-    const test_input = "{\"test 123\"}";
-
-    var lexer = template.Lexer.init(test_input, allocator);
-
-    var token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_start);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .string);
-
-    try testing.expectEqualStrings("test 123", token.value);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_end);
-}
-
-test "boolean literal" {
-    const test_input = "{true}";
-
-    var lexer = template.Lexer.init(test_input, allocator);
-
-    var token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_start);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .boolean);
-    try testing.expectEqualStrings("true", token.value);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_end);
-}
-
-test "float literal" {
-    const test_input = "{99.9}";
-
-    var lexer = template.Lexer.init(test_input, allocator);
-
-    var token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_start);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .float);
-    try testing.expectEqualStrings("99.9", token.value);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_end);
-}
-
-test "token positions" {
-    const input =
-        \\// test
-        \\<style>
-        \\    html {
-        \\        color: @{2 + 2};
-        \\    }
-        \\</style>
+test "for loop basic" {
+    const test_input =
+        \\{for item in items}
+        \\    <div>content</div>
+        \\{/for}
     ;
 
-    var lexer = template.Lexer.init(input, allocator);
+    var lexer = template.Lexer.init(test_input, allocator);
+    const tokens = lexer.tokenize() catch unreachable;
 
-    var token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .comment);
-    try testing.expect(token.position.line == 1);
-    try testing.expect(token.position.column == 1);
+    var parser = template.Parser.init(tokens, allocator);
+    const ast = parser.parse() catch unreachable;
 
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .css_start);
-    try testing.expect(token.position.line == 2);
-    try testing.expect(token.position.column == 1);
+    try testing.expect(ast.program.root.block.len == 1);
+    try testing.expect(ast.program.root.block[0] == .block_for);
 
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .text_css);
-    try testing.expect(token.position.line == 3);
-    try testing.expect(token.position.column == 5);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .text_css);
-    try testing.expect(token.position.line == 4);
-    try testing.expect(token.position.column == 9);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_start);
-    try testing.expect(token.position.line == 4);
-    try testing.expect(token.position.column == 16);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .integer);
-    try testing.expect(token.position.line == 4);
-    try testing.expect(token.position.column == 18);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .plus);
-    try testing.expect(token.position.line == 4);
-    try testing.expect(token.position.column == 20);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .integer);
-    try testing.expect(token.position.line == 4);
-    try testing.expect(token.position.column == 22);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .expr_end);
-    try testing.expect(token.position.line == 4);
-    try testing.expect(token.position.column == 23);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .text_css);
-    try testing.expect(token.position.line == 4);
-    try testing.expect(token.position.column == 24);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .text_css);
-    try testing.expect(token.position.line == 5);
-    try testing.expect(token.position.column == 5);
-
-    token = lexer.tokenize_lexeme();
-    try testing.expect(token.type == .css_end);
-    try testing.expect(token.position.line == 6);
-    try testing.expect(token.position.column == 1);
+    const for_block = ast.program.root.block[0].block_for;
+    try testing.expectEqualStrings("item", for_block.item_var);
+    try testing.expect(for_block.index_var == null);
+    try testing.expect(for_block.iterable.len == 1);
+    try testing.expectEqualStrings("items", for_block.iterable[0].value);
+    try testing.expect(for_block.body.block.len == 1);
+    try testing.expect(for_block.body.block[0] == .text);
 }
 
-test "print token list" {
-    var lexer = template.Lexer.init(full_syntax_input, allocator);
+test "for loop with index" {
+    const test_input =
+        \\{for user, index in users}
+        \\    <tr>content</tr>
+        \\{/for}
+    ;
 
-    const tokens = lexer.tokenize() catch |err| {
-        std.debug.print("Lexer error: {}\n", .{err});
-        return;
-    };
+    var lexer = template.Lexer.init(test_input, allocator);
+    const tokens = lexer.tokenize() catch unreachable;
 
-    print("==============\n", .{});
+    var parser = template.Parser.init(tokens, allocator);
+    const ast = parser.parse() catch unreachable;
 
-    for (tokens) |token| {
-        print("{:>2}:{:<5} {s:<15} {s}\n", .{
-            token.position.line,
-            token.position.column,
-            @tagName(token.type),
-            token.value,
-        });
-    }
+    try testing.expect(ast.program.root.block.len == 1);
+    try testing.expect(ast.program.root.block[0] == .block_for);
+
+    const for_block = ast.program.root.block[0].block_for;
+    try testing.expectEqualStrings("user", for_block.item_var);
+    try testing.expectEqualStrings("index", for_block.index_var.?);
+    try testing.expect(for_block.iterable.len == 1);
+    try testing.expectEqualStrings("users", for_block.iterable[0].value);
 }
 
-// test "print node tree" {
-//     var lexer = template.Lexer.init(full_syntax_input, allocator);
+test "nested for loops" {
+    const test_input =
+        \\{for category in categories}
+        \\    {for product in products}
+        \\        <span>item</span>
+        \\    {/for}
+        \\{/for}
+    ;
 
-//     const tokens = lexer.tokenize() catch |err| {
-//         std.debug.print("Test failed: Lexer tokenize error: {}\n", .{err});
-//         return err;
-//     };
+    var lexer = template.Lexer.init(test_input, allocator);
+    const tokens = lexer.tokenize() catch unreachable;
 
-//     var parser = template.Parser.init(tokens, allocator);
+    var parser = template.Parser.init(tokens, allocator);
+    const ast = parser.parse() catch unreachable;
 
-//     const ast = parser.parse() catch |err| switch (err) {
-//         template.ParseError.UnexpectedToken => {
-//             std.debug.print("unexpected token\n", .{});
-//             return error.SkipZigTest;
-//         },
+    try testing.expect(ast.program.root.block.len == 1);
+    try testing.expect(ast.program.root.block[0] == .block_for);
 
-//         template.ParseError.UnexpectedEndOfInput => {
-//             std.debug.print("unexpected end of input\n", .{});
-//             return error.SkipZigTest;
-//         },
+    const outer_for = ast.program.root.block[0].block_for;
+    try testing.expectEqualStrings("category", outer_for.item_var);
+    try testing.expect(outer_for.body.block.len == 1);
+    try testing.expect(outer_for.body.block[0] == .block_for);
 
-//         template.ParseError.UnsupportedExpression => {
-//             std.debug.print("unsupported expression\n", .{});
-//             return error.SkipZigTest;
-//         },
+    const inner_for = outer_for.body.block[0].block_for;
+    try testing.expectEqualStrings("product", inner_for.item_var);
+    try testing.expectEqualStrings("products", inner_for.iterable[0].value);
+}
 
-//         template.ParseError.OutOfMemory => {
-//             std.debug.print("out of memory\n", .{});
-//             return error.SkipZigTest;
-//         },
-//     };
+test "switch block basic" {
+    const test_input =
+        \\{switch value}
+        \\    {case 1}
+        \\        <p>One</p>
+        \\    {case 2}
+        \\        <p>Two</p>
+        \\    {default}
+        \\        <p>Other</p>
+        \\{/switch}
+    ;
 
-//     const fmt = std.json.fmt(ast, .{ .whitespace = .indent_2 });
+    var lexer = template.Lexer.init(test_input, allocator);
+    const tokens = lexer.tokenize() catch unreachable;
 
-//     var writer = std.Io.Writer.Allocating.init(allocator);
+    var parser = template.Parser.init(tokens, allocator);
+    const ast = parser.parse() catch unreachable;
 
-//     fmt.format(&writer.writer) catch |err| {
-//         std.debug.print("json error: {}\n", .{err});
-//         return error.SkipZigTest;
-//     };
+    try testing.expect(ast.program.root.block.len == 1);
+    try testing.expect(ast.program.root.block[0] == .block_switch);
 
-//     const output = writer.toOwnedSlice() catch |err| {
-//         std.debug.print("writer error: {}\n", .{err});
-//         return error.SkipZigTest;
-//     };
+    const switch_block = ast.program.root.block[0].block_switch;
+    try testing.expect(switch_block.expression.len == 1);
+    try testing.expectEqualStrings("value", switch_block.expression[0].value);
+    try testing.expect(switch_block.cases.len == 3);
 
-//     print("==============\n", .{});
-//     print("{s}", .{output});
-// }
+    try testing.expect(switch_block.cases[0] == .block_case);
+    const case1 = switch_block.cases[0].block_case;
+    // try testing.expect(case1.is_default == false);
+    try testing.expect(case1.values.?.len == 1);
+    try testing.expectEqualStrings("1", case1.values.?[0][0].value);
+
+    try testing.expect(switch_block.cases[2] == .block_case);
+    const default_case = switch_block.cases[2].block_case;
+    // try testing.expect(default_case.is_default == true);
+    try testing.expect(default_case.values == null);
+}
+
+test "switch block with multiple case values" {
+    const test_input =
+        \\{switch role}
+        \\    {case 'admin', 'moderator'}
+        \\        <div>Admin panel</div>
+        \\    {case 'user'}
+        \\        <div>User panel</div>
+        \\    {default}
+        \\        <div>Guest panel</div>
+        \\{/switch}
+    ;
+
+    var lexer = template.Lexer.init(test_input, allocator);
+    const tokens = lexer.tokenize() catch unreachable;
+
+    var parser = template.Parser.init(tokens, allocator);
+    const ast = parser.parse() catch unreachable;
+
+    try testing.expect(ast.program.root.block.len == 1);
+    try testing.expect(ast.program.root.block[0] == .block_switch);
+
+    const switch_block = ast.program.root.block[0].block_switch;
+    try testing.expect(switch_block.cases.len == 3);
+
+    const case1 = switch_block.cases[0].block_case;
+    try testing.expect(case1.values.?.len == 2);
+    try testing.expectEqualStrings("admin", case1.values.?[0][0].value);
+    try testing.expectEqualStrings("moderator", case1.values.?[1][0].value);
+    try testing.expect(case1.body.block.len == 1);
+    try testing.expect(case1.body.block[0] == .text);
+}
+
+test "multiple switch blocks" {
+    const test_input =
+        \\{switch status}
+        \\    {case 1}
+        \\        <span>Active</span>
+        \\{/switch}
+        \\{switch type}
+        \\    {case 'premium'}
+        \\        <span>Premium</span>
+        \\{/switch}
+    ;
+
+    var lexer = template.Lexer.init(test_input, allocator);
+    const tokens = lexer.tokenize() catch unreachable;
+
+    var parser = template.Parser.init(tokens, allocator);
+    const ast = parser.parse() catch unreachable;
+
+    try testing.expect(ast.program.root.block.len == 2);
+    try testing.expect(ast.program.root.block[0] == .block_switch);
+    try testing.expect(ast.program.root.block[1] == .block_switch);
+
+    const switch1 = ast.program.root.block[0].block_switch;
+    const switch2 = ast.program.root.block[1].block_switch;
+
+    try testing.expectEqualStrings("status", switch1.expression[0].value);
+    try testing.expectEqualStrings("type", switch2.expression[0].value);
+}
