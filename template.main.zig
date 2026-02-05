@@ -85,13 +85,13 @@ pub const Lexer = struct {
 
     pub fn init(input: []const u8, allocator: std.mem.Allocator) Lexer {
         return Lexer{
-            .input = input,
+            .input     = input,
             .allocator = allocator,
-            .cursor = 0,
-            .line = 1,
-            .column = 1,
-            .mode = .text,
-            .type = .text,
+            .cursor    = 0,
+            .line      = 1,
+            .column    = 1,
+            .mode      = .text,
+            .type      = .text,
             .prev_mode = .text,
         };
     }
@@ -101,11 +101,11 @@ pub const Lexer = struct {
     }
 
     inline fn is_keyword_boundary(ch: u8) bool {
-        return is_whitespace(ch) or ch == '}';
+        return is_whitespace(ch) or ch == '}'; // @note -- kind of flaky
     }
 
     inline fn is_alpha(ch: u8) bool {
-        return (ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z') or ch == '_';
+        return (ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z') or ch == '_'; // @later -- allow dash?
     }
 
     inline fn is_numeric(ch: u8) bool {
@@ -899,7 +899,7 @@ pub const Lexer = struct {
     }
 
     pub fn tokenize(self: *Lexer) ![]Token {
-        var tokens = std.ArrayList(Token){};
+        var tokens: std.ArrayList(Token) = .empty;
 
         while (self.current_ch()) |_| {
             const token = self.tokenize_lexeme();
@@ -1062,9 +1062,9 @@ pub const Parser = struct {
 
     pub fn init(tokens: []Token, allocator: std.mem.Allocator) Parser {
         const parser = Parser{
-            .tokens        = tokens,
-            .allocator     = allocator,
-            .cursor        = 0
+            .tokens    = tokens,
+            .allocator = allocator,
+            .cursor    = 0
         };
 
         return parser;
@@ -1145,8 +1145,7 @@ pub const Parser = struct {
     }
 
     fn parse_if_sequence(self: *Parser, is_nested: bool) ParseError!Node {
-    	// @note -- try self.expect_token(.expr_start) is ommitted because
-     	// the if-block could be an else-if block
+    	// @note -- omit self.expect_token(.expr_start) because this could be an else-if block
         try self.expect_token(.if_start);
 
         const condition = try self.parse_expression();
