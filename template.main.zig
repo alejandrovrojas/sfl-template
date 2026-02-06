@@ -911,16 +911,11 @@ pub const Lexer = struct {
 };
 
 pub const ParseError = error{
+    OutOfMemory,
     UnexpectedToken,
     UnexpectedEndOfInput,
-    UnsupportedExpression,
-    OutOfMemory,
-    // Block parsing errors
-    MissingBlockEnd,
-    MissingIfEnd,
-    MissingElseEnd,
-    UnmatchedElse,
-    NestedBlockError,
+    InvalidExpression,
+    InvalidSyntax,
     InvalidBlockStructure,
 };
 
@@ -933,39 +928,35 @@ pub const NodeType = enum {
     block_switch,
     block_case,
     block_for,
-    //block_for,
-    //block_if,
-    //block_switch,
-    //block_else,
-    //literal_int,
-    //literal_float,
-    //literal_string,
-    //literal_boolean,
-    //literal_nil,
-    //exp_binary,
-    //exp_unary,
-    //expression,
-    //identifier,
+    literal_null,
+    literal_int,
+    literal_float,
+    literal_string,
+    literal_boolean,
+    expression,
+    expression_binary,
+    expression_unary,
+    identifier,
 };
 
 pub const Node = union(NodeType) {
-    program:         Program,
-    block:           Block,
-    text:            Text,
-    comment:         Comment,
-    block_if:        If,
-    block_switch:    Switch,
-    block_case:      Case,
-    block_for:       For,
-    //literal_string:  LiteralString,
-    //literal_int:     LiteralInt,
-    //literal_float:   LiteralFloat,
-    //literal_boolean: LiteralBoolean,
-    //literal_nil:     LiteralNil,
-    //exp_binary:      ExpBinary,
-    //exp_unary:       ExpUnary,
-    //expression:      Expression,
-    //identifier:      Identifier,
+    program:           Program,
+    block:             Block,
+    text:              Text,
+    comment:           Comment,
+    block_if:          If,
+    block_switch:      Switch,
+    block_case:        Case,
+    block_for:         For,
+    literal_null:      LiteralNull,
+    literal_int:       LiteralInt,
+    literal_float:     LiteralFloat,
+    literal_string:    LiteralString,
+    literal_boolean:   LiteralBoolean,
+    expression:        Expression,
+    expression_binary: ExpressionBinary,
+    expression_unary:  ExpressionUnary,
+    identifier:        Identifier,
 };
 
 pub const Program = struct {
@@ -985,75 +976,66 @@ pub const Text = struct {
 };
 
 pub const If = struct {
-    condition: []Token,
+    condition: *Node,
     consequent: Block,
-    alternate: ?*Node
+    alternate: ?*Node,
 };
 
 pub const Switch = struct {
-    expression: []Token,
+    expression: *Node,
     cases: []Node,
 };
 
 pub const Case = struct {
-    values: ?[][]Token,
+    values: ?[]*Node,
     body: Block,
 };
 
 pub const For = struct {
     item_var: []const u8,
     index_var: ?[]const u8,
-    iterable: []Token,
+    iterable: *Node,
     body: Block,
 };
 
-// pub const LiteralString = struct {
-//     type:  NodeType.literal_string,
-//     value: []u8,
-// };
-//
-// pub const LiteralInt = struct {
-//     type:  NodeType.literal_int,
-//     value: i64,
-// };
-//
-// pub const LiteralFloat = struct {
-//     type:  NodeType.literal_float,
-//     value: f64,
-// };
-//
-// pub const LiteralBoolean = struct {
-//     type:  NodeType.literal_boolean,
-//     value: bool,
-// };
-//
-// pub const LiteralNil = struct {
-//     type:  NodeType.literal_nil,
-//     value: void,
-// };
-//
-// pub const ExpBinary = struct {
-//     type:     NodeType.exp_binary,
-//     operator: *Token,
-//     left:     *Node,
-//     right:    *Node,
-// };
-//
-// pub const ExpUnary = struct {
-//     type:     NodeType.exp_unary,
-//     operator: *Token,
-//     right:    *Node,
-// };
-//
-// pub const Expression = struct {
-//     type:  NodeType.expression,
-//     value: *Node,
-// };
-//
-// pub const Identifier = struct {
-//     type:  NodeType.identifier,
-//     value: []u8,
-// };
+pub const LiteralInt = struct {
+    value: i64,
+};
+
+pub const LiteralFloat = struct {
+    value: f64,
+};
+
+pub const LiteralString = struct {
+    value: []const u8,
+};
+
+pub const LiteralBoolean = struct {
+    value: bool,
+};
+
+pub const LiteralNull = struct {
+    value: i8
+};
+
+pub const ExpressionBinary = struct {
+    left: *Node,
+    operator: TokenType,
+    right: *Node,
+};
+
+pub const ExpressionUnary = struct {
+    operator: TokenType,
+    operand: *Node,
+};
+
+pub const Identifier = struct {
+    name: []const u8,
+};
+
+pub const Expression = struct {
+    expr: *Node,
+};
 
 pub const Parser = struct {
     tokens:        []Token,
@@ -1212,21 +1194,234 @@ pub const Parser = struct {
         };
     }
 
-    // @note -- temporarily just return a token list, this will later
-    // be implemented properly to return an expression node
-    fn parse_expression(self: *Parser) ParseError![]Token {
-        var condition_tokens = std.ArrayList(Token){};
+    fn parse_expression(self: *Parser) ParseError!*Node {
+        return self.parse_logical_or();
+    }
+
+    fn parse_binary_expression(self: *Parser, operators: []const TokenType, subexpression: fn(p: *Parser) ParseError!*Node) ParseError!*Node {
+        var left = try subexpression(self);
 
         while (self.current_token()) |token| {
-            if (token.type == .expr_end) {
+            var found = false;
+
+            for (operators) |op| {
+                if (token.type == op) {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
                 break;
             }
 
-            try condition_tokens.append(self.allocator, token);
+            const operator = token.type;
+
             self.advance_token();
+
+            const right = try subexpression(self);
+            const binary = try self.allocator.create(Node);
+
+            binary.* = Node{
+                .expression_binary = ExpressionBinary{
+                    .left = left,
+                    .operator = operator,
+                    .right = right,
+                }
+            };
+
+            left = binary;
         }
 
-        return try condition_tokens.toOwnedSlice(self.allocator);
+        return left;
+    }
+
+    fn parse_logical_or(self: *Parser) ParseError!*Node {
+        const operators = [_]TokenType{
+            .logical_or
+        };
+
+        return self.parse_binary_expression(&operators, parse_logical_and);
+    }
+
+    fn parse_logical_and(self: *Parser) ParseError!*Node {
+        const operators = [_]TokenType{
+            .logical_and
+        };
+
+        return self.parse_binary_expression(&operators, parse_equality);
+    }
+
+    fn parse_equality(self: *Parser) ParseError!*Node {
+        const operators = [_]TokenType{
+            .equal,
+            .not_equal
+        };
+
+        return self.parse_binary_expression(&operators, parse_relational);
+    }
+
+    fn parse_relational(self: *Parser) ParseError!*Node {
+        const operators = [_]TokenType{
+            .less_than,
+            .greater_than,
+            .less_equal,
+            .greater_equal
+        };
+
+        return self.parse_binary_expression(&operators, parse_additive);
+    }
+
+    fn parse_additive(self: *Parser) ParseError!*Node {
+        const operators = [_]TokenType{
+            .plus,
+            .minus,
+        };
+
+        return self.parse_binary_expression(&operators, parse_multiplicative);
+    }
+
+    fn parse_multiplicative(self: *Parser) ParseError!*Node {
+        const operators = [_]TokenType{
+            .multiplication,
+            .division,
+        };
+
+        return self.parse_binary_expression(&operators, parse_unary);
+    }
+
+    fn parse_unary(self: *Parser) ParseError!*Node {
+        if (self.current_token()) |token| {
+            if (token.type == .minus or token.type == .exclamation) {
+                const operator = token.type;
+
+                self.advance_token();
+
+                const operand = try self.parse_unary();
+                const unary = try self.allocator.create(Node);
+
+                unary.* = Node{
+                    .expression_unary = ExpressionUnary{
+                        .operator = operator,
+                        .operand = operand,
+                    }
+                };
+
+                return unary;
+            }
+        }
+
+        return self.parse_primary();
+    }
+
+    fn parse_primary(self: *Parser) ParseError!*Node {
+        if (self.current_token()) |token| {
+            switch (token.type) {
+                .null => {
+                    self.advance_token();
+
+                    const node = try self.allocator.create(Node);
+
+                    node.* = Node{
+                        .literal_null = LiteralNull{
+                            .value = 0
+                        }
+                    };
+
+                    return node;
+                },
+                
+                .integer => {
+                    self.advance_token();
+
+                    const node = try self.allocator.create(Node);
+
+                    node.* = Node{
+                        .literal_int = LiteralInt{
+                            .value = std.fmt.parseInt(i64, token.value, 10) catch {
+                            	return ParseError.InvalidSyntax;
+                            }
+                        }
+                    };
+
+                    return node;
+                },
+
+                .float => {
+                    self.advance_token();
+
+                    const node = try self.allocator.create(Node);
+
+                    node.* = Node{
+                        .literal_float = LiteralFloat{
+                            .value = std.fmt.parseFloat(f64, token.value) catch {
+                                return ParseError.InvalidSyntax;
+                            }
+                        }
+                    };
+
+                    return node;
+                },
+
+                .string => {
+                    self.advance_token();
+
+                    const node = try self.allocator.create(Node);
+
+                    node.* = Node{
+                        .literal_string = LiteralString{
+                            .value = token.value
+                        }
+                    };
+
+                    return node;
+                },
+
+                .boolean => {
+                    self.advance_token();
+
+                    const node = try self.allocator.create(Node);
+
+                    node.* = Node{
+                    	.literal_boolean = LiteralBoolean{
+                            .value = std.mem.eql(u8, token.value, "true")
+                     	}
+                    };
+
+                    return node;
+                },
+
+                .identifier => {
+                    self.advance_token();
+
+                    const node = try self.allocator.create(Node);
+
+                    node.* = Node{
+                    	.identifier = Identifier{
+                            .name = token.value
+                     	}
+                    };
+
+                    return node;
+                },
+
+                .l_paren => {
+                    self.advance_token();
+
+                    const expr = try self.parse_expression();
+
+                    try self.expect_token(.r_paren);
+
+                    return expr;
+                },
+
+                else => {
+                    return ParseError.UnexpectedToken;
+                },
+            }
+        }
+
+        return ParseError.UnexpectedEndOfInput;
     }
 
     fn parse_switch_block(self: *Parser) ParseError!Node {
@@ -1275,27 +1470,16 @@ pub const Parser = struct {
     fn parse_case_block(self: *Parser) ParseError!Node {
         try self.expect_token(.case_start);
 
-        var case_values: std.ArrayList([]Token) = .empty;
+        var case_values: std.ArrayList(*Node) = .empty;
 
         while (self.current_token()) |token| {
             if (token.type == .expr_end) {
                 break;
             }
 
-            var value_tokens: std.ArrayList(Token) = .empty;
+            const expr = try self.parse_expression();
 
-            while (self.current_token()) |value_token| {
-                if (value_token.type == .comma or value_token.type == .expr_end) {
-                    break;
-                }
-
-                try value_tokens.append(self.allocator, value_token);
-                self.advance_token();
-            }
-
-            if (value_tokens.items.len > 0) {
-                try case_values.append(self.allocator, try value_tokens.toOwnedSlice(self.allocator));
-            }
+            try case_values.append(self.allocator, expr);
 
             if (self.is_current_token(.comma)) {
                 self.advance_token();
@@ -1325,14 +1509,14 @@ pub const Parser = struct {
         try self.expect_token(.expr_end);
 
         const body_nodes = try self.parse_until(&[_]TokenType{
-        	.switch_end
+            .switch_end
         });
 
         return Node{
             .block_case = Case{
             	.values = null,
                 .body = Block{
-                	.block = body_nodes,
+                    .block = body_nodes,
                 },
             },
         };
@@ -1341,22 +1525,25 @@ pub const Parser = struct {
     fn parse_for_block(self: *Parser) ParseError!Node {
         try self.expect_token(.for_start);
 
-        var item_var: []const u8 = "";
+        var iterator: []const u8 = "";
+
         if (self.current_token()) |token| {
             if (token.type == .identifier) {
-                item_var = token.value;
+                iterator = token.value;
                 self.advance_token();
             } else {
                 return ParseError.UnexpectedToken;
             }
         }
 
-        var index_var: ?[]const u8 = null;
+        var iterator_index: ?[]const u8 = null;
+
         if (self.is_current_token(.comma)) {
             self.advance_token();
+
             if (self.current_token()) |token| {
                 if (token.type == .identifier) {
-                    index_var = token.value;
+                    iterator_index = token.value;
                     self.advance_token();
                 } else {
                     return ParseError.UnexpectedToken;
@@ -1366,14 +1553,7 @@ pub const Parser = struct {
 
         try self.expect_token(.for_in);
 
-        var iterable_tokens = std.ArrayList(Token){};
-        while (self.current_token()) |token| {
-            if (token.type == .expr_end) {
-                break;
-            }
-            try iterable_tokens.append(self.allocator, token);
-            self.advance_token();
-        }
+        const iterable = try self.parse_expression();
 
         try self.expect_token(.expr_end);
 
@@ -1387,10 +1567,21 @@ pub const Parser = struct {
 
         return Node{
             .block_for = For{
-                .item_var = item_var,
-                .index_var = index_var,
-                .iterable = try iterable_tokens.toOwnedSlice(self.allocator),
+                .item_var = iterator,
+                .index_var = iterator_index,
+                .iterable = iterable,
                 .body = Block{ .block = body_nodes },
+            },
+        };
+    }
+
+    fn parse_expression_block(self: *Parser) ParseError!Node {
+        const expr = try self.parse_expression();
+        try self.expect_token(.expr_end);
+
+        return Node{
+            .expression = Expression{
+                .expr = expr,
             },
         };
     }
@@ -1420,7 +1611,6 @@ pub const Parser = struct {
         const token = self.current_token() orelse {
             return ParseError.UnexpectedEndOfInput;
         };
-
 
         switch (token.type) {
             .text => {
@@ -1470,7 +1660,7 @@ pub const Parser = struct {
 
                         else => {
                             self.advance_token();
-                            return ParseError.UnsupportedExpression;
+                            return try self.parse_expression_block();
                         },
                     }
                 } else {
@@ -1487,7 +1677,7 @@ pub const Parser = struct {
     }
 
     pub fn parse(self: *Parser) ParseError!Node {
-        var nodes = std.ArrayList(Node){};
+        var nodes: std.ArrayList(Node) = .empty;
 
         while (self.current_token()) |_| {
             const node = try self.parse_statement();
@@ -1513,17 +1703,7 @@ pub fn main() void {
 
     const allocator = arena.allocator();
 
-    const file = std.fs.cwd().openFile("test_nested_for.sfl", .{}) catch |err| {
-        std.debug.print("Error opening file: {}\n", .{err});
-        return;
-    };
-    defer file.close();
-
-    const input = file.readToEndAlloc(allocator, 1024 * 1024) catch |err| {
-        std.debug.print("Error reading file: {}\n", .{err});
-        return;
-    };
-
+    const input = "{if true}{2 + 2 > 4}{/if}";
     var lexer = Lexer.init(input, allocator);
 
     const tokens = lexer.tokenize() catch |err| {
@@ -1531,18 +1711,14 @@ pub fn main() void {
         return;
     };
 
-    for (tokens) |token| {
-        std.debug.print("{:>2}:{:<5} {s:<15} {s}\n", .{
-            token.position.line,
-            token.position.column,
-            @tagName(token.type),
-            token.value,
-        });
-    }
-
     var parser = Parser.init(tokens, allocator);
 
     const ast = parser.parse() catch |err| switch (err) {
+        ParseError.OutOfMemory => {
+            std.debug.print("Parse error: Out of memory\n", .{});
+            return;
+        },
+
         ParseError.UnexpectedToken => {
             std.debug.print("Parse error: Unexpected token encountered\n", .{});
             return;
@@ -1553,38 +1729,13 @@ pub fn main() void {
             return;
         },
 
-        ParseError.UnsupportedExpression => {
+        ParseError.InvalidExpression => {
             std.debug.print("Parse error: Unsupported expression syntax\n", .{});
             return;
         },
 
-        ParseError.OutOfMemory => {
-            std.debug.print("Parse error: Out of memory\n", .{});
-            return;
-        },
-
-        ParseError.MissingBlockEnd => {
-            std.debug.print("Parse error: Missing block end tag\n", .{});
-            return;
-        },
-
-        ParseError.MissingIfEnd => {
-            std.debug.print("Parse error: Missing if end tag\n", .{});
-            return;
-        },
-
-        ParseError.MissingElseEnd => {
-            std.debug.print("Parse error: Missing else end tag\n", .{});
-            return;
-        },
-
-        ParseError.UnmatchedElse => {
-            std.debug.print("Parse error: Unmatched else block\n", .{});
-            return;
-        },
-
-        ParseError.NestedBlockError => {
-            std.debug.print("Parse error: Invalid block nesting\n", .{});
+        ParseError.InvalidSyntax => {
+            std.debug.print("Parse error: Invalid syntax\n", .{});
             return;
         },
 
@@ -1594,10 +1745,73 @@ pub fn main() void {
         },
     };
 
-    json(ast, allocator) catch |err| {
-        std.debug.print("JSON output error: {}\n", .{err});
-        return;
-    };
+    print_ast(&ast, 0);
+}
+
+fn print_ast(node: *const Node, indent: usize) void {
+    const spaces = "                                        ";
+    const prefix = spaces[0..@min(indent * 2, spaces.len)];
+
+    switch (node.*) {
+        .program => |prog| {
+            std.debug.print("{s}PROGRAM:\n", .{prefix});
+            std.debug.print("{s}  BLOCK [{}]:\n", .{ prefix, prog.root.block.len });
+
+            for (prog.root.block) |*child| {
+                print_ast(child, indent + 2);
+            }
+        },
+
+        .block => |block| {
+            std.debug.print("{s}BLOCK [{}]:\n", .{ prefix, block.block.len });
+
+            for (block.block) |*child| {
+                print_ast(child, indent + 1);
+            }
+        },
+
+        .block_if => |block| {
+            std.debug.print("{s}BLOCK [{}]:\n", .{ prefix, block.block.len });
+
+            for (block.block) |*child| {
+                print_ast(child, indent + 1);
+            }
+        },
+
+        .text => |text| {
+            std.debug.print("{s}TEXT: \"{s}\"\n", .{ prefix, text.value });
+        },
+
+        .expression => |expr| {
+            std.debug.print("{s}EXPRESSION:\n", .{prefix});
+            print_expression(expr.expr, indent + 1);
+        },
+
+        else => std.debug.print("{any}\n", .{ node.* }),
+    }
+}
+
+fn print_expression(node: *Node, indent: usize) void {
+    const spaces = "                                        ";
+    const prefix = spaces[0..@min(indent * 2, spaces.len)];
+
+    switch (node.*) {
+        .literal_int => |lit| std.debug.print("{s}INT: {}\n", .{ prefix, lit.value }),
+        .literal_float => |lit| std.debug.print("{s}FLOAT: {d}\n", .{ prefix, lit.value }),
+        .literal_string => |lit| std.debug.print("{s}STRING: \"{s}\"\n", .{ prefix, lit.value }),
+        .literal_boolean => |lit| std.debug.print("{s}BOOL: {}\n", .{ prefix, lit.value }),
+        .identifier => |id| std.debug.print("{s}ID: {s}\n", .{ prefix, id.name }),
+        .expression_binary => |bin| {
+            std.debug.print("{s}BINARY: {s}\n", .{ prefix, @tagName(bin.operator) });
+            print_expression(bin.left, indent + 1);
+            print_expression(bin.right, indent + 1);
+        },
+        .expression_unary => |un| {
+            std.debug.print("{s}UNARY: {s}\n", .{ prefix, @tagName(un.operator) });
+            print_expression(un.operand, indent + 1);
+        },
+        else => std.debug.print("{s}OTHER: {s}\n", .{ prefix, @tagName(node.*) }),
+    }
 }
 
 fn json(ast: Node, allocator: std.mem.Allocator) !void {
