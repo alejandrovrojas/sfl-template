@@ -97,7 +97,7 @@ pub const Lexer = struct {
     }
 
     inline fn is_whitespace(ch: u8) bool {
-    	return (ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r');
+        return (ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r');
     }
 
     inline fn is_keyword_boundary(ch: u8) bool {
@@ -598,7 +598,7 @@ pub const Lexer = struct {
 
                         // null
                         if (self.cursor + 5 <= self.input.len and
-                        	self.input[self.cursor]     == 'n' and
+                            self.input[self.cursor]     == 'n' and
                             self.input[self.cursor + 1] == 'u' and
                             self.input[self.cursor + 2] == 'l' and
                             self.input[self.cursor + 3] == 'l' and
@@ -630,7 +630,7 @@ pub const Lexer = struct {
 
                         // false
                         if (self.cursor + 6 <= self.input.len and
-                        	self.input[self.cursor]     == 'f' and
+                            self.input[self.cursor]     == 'f' and
                             self.input[self.cursor + 1] == 'a' and
                             self.input[self.cursor + 2] == 'l' and
                             self.input[self.cursor + 3] == 's' and
@@ -647,7 +647,7 @@ pub const Lexer = struct {
 
                         // for
                         if (self.cursor + 4 <= self.input.len and
-                        	self.input[self.cursor]     == 'f' and
+                            self.input[self.cursor]     == 'f' and
                             self.input[self.cursor + 1] == 'o' and
                             self.input[self.cursor + 2] == 'r' and
                             is_keyword_boundary(self.input[self.cursor + 3]))
@@ -912,6 +912,7 @@ pub const Lexer = struct {
 
 pub const ParseError = error{
     OutOfMemory,
+    UnknownToken,
     UnexpectedToken,
     UnexpectedEndOfInput,
     InvalidExpression,
@@ -1080,6 +1081,7 @@ pub const Parser = struct {
         };
 
         if (token.type != expected_type) {
+            std.debug.print("{s}, {any}", .{ token.value, token.type });
             return ParseError.UnexpectedToken;
         }
 
@@ -1127,7 +1129,7 @@ pub const Parser = struct {
     }
 
     fn parse_if_sequence(self: *Parser, is_nested: bool) ParseError!Node {
-    	// @note -- omit self.expect_token(.expr_start) because this could be an else-if block
+        // @note -- omit self.expect_token(.expr_start) because this could be an else-if block
         try self.expect_token(.if_start);
 
         const condition = try self.parse_expression();
@@ -1151,8 +1153,11 @@ pub const Parser = struct {
             if (next) |next_token| {
                 if (next_token.type == .else_start) {
                     self.advance_token();
-                    alternate = try self.allocator.create(Node);
-                    alternate.?.* = try self.parse_else_block();
+
+                    const else_block = try self.allocator.create(Node);
+
+                    else_block.* = try self.parse_else_block();
+                    alternate = else_block;
                 }
             }
         }
@@ -1202,31 +1207,25 @@ pub const Parser = struct {
         var left = try subexpression(self);
 
         while (self.current_token()) |token| {
-            var found = false;
-
-            for (operators) |op| {
+            const is_token_operator = for (operators) |op| {
                 if (token.type == op) {
-                    found = true;
-                    break;
+                    break true;
                 }
-            }
+            } else false;
 
-            if (!found) {
+            if (!is_token_operator) {
                 break;
             }
 
-            const operator = token.type;
-
             self.advance_token();
 
-            const right = try subexpression(self);
             const binary = try self.allocator.create(Node);
 
             binary.* = Node{
                 .expression_binary = ExpressionBinary{
                     .left = left,
-                    .operator = operator,
-                    .right = right,
+                    .operator = token.type,
+                    .right = try subexpression(self)
                 }
             };
 
@@ -1330,7 +1329,7 @@ pub const Parser = struct {
 
                     return node;
                 },
-                
+
                 .integer => {
                     self.advance_token();
 
@@ -1339,7 +1338,7 @@ pub const Parser = struct {
                     node.* = Node{
                         .literal_int = LiteralInt{
                             .value = std.fmt.parseInt(i64, token.value, 10) catch {
-                            	return ParseError.InvalidSyntax;
+                                return ParseError.InvalidSyntax;
                             }
                         }
                     };
@@ -1383,9 +1382,9 @@ pub const Parser = struct {
                     const node = try self.allocator.create(Node);
 
                     node.* = Node{
-                    	.literal_boolean = LiteralBoolean{
+                        .literal_boolean = LiteralBoolean{
                             .value = std.mem.eql(u8, token.value, "true")
-                     	}
+                        }
                     };
 
                     return node;
@@ -1397,9 +1396,9 @@ pub const Parser = struct {
                     const node = try self.allocator.create(Node);
 
                     node.* = Node{
-                    	.identifier = Identifier{
+                        .identifier = Identifier{
                             .name = token.value
-                     	}
+                        }
                     };
 
                     return node;
@@ -1489,16 +1488,16 @@ pub const Parser = struct {
         try self.expect_token(.expr_end);
 
         const body_nodes = try self.parse_until(&[_]TokenType{
-        	.case_start,
-         	.default_start,
-         	.switch_end
+            .case_start,
+            .default_start,
+            .switch_end
         });
 
         return Node{
             .block_case = Case{
                 .values = try case_values.toOwnedSlice(self.allocator),
                 .body = Block{
-                	.block = body_nodes
+                    .block = body_nodes
                 },
             },
         };
@@ -1514,7 +1513,7 @@ pub const Parser = struct {
 
         return Node{
             .block_case = Case{
-            	.values = null,
+                .values = null,
                 .body = Block{
                     .block = body_nodes,
                 },
@@ -1613,6 +1612,11 @@ pub const Parser = struct {
         };
 
         switch (token.type) {
+            .comment => {
+                self.advance_token();
+                return self.parse_comment(token);
+            },
+
             .text => {
                 self.advance_token();
                 return self.parse_text(token);
@@ -1628,9 +1632,24 @@ pub const Parser = struct {
                 return self.parse_text(token);
             },
 
-            .comment => {
+            .css_start => {
                 self.advance_token();
-                return self.parse_comment(token);
+                return self.parse_text(token);
+            },
+
+            .css_end => {
+                self.advance_token();
+                return self.parse_text(token);
+            },
+
+            .js_start => {
+                self.advance_token();
+                return self.parse_text(token);
+            },
+
+            .js_end => {
+                self.advance_token();
+                return self.parse_text(token);
             },
 
             .expr_start => {
@@ -1671,7 +1690,7 @@ pub const Parser = struct {
 
             else => {
                 self.advance_token();
-                return ParseError.UnexpectedToken;
+                return ParseError.UnknownToken;
             },
         }
     }
@@ -1703,7 +1722,54 @@ pub fn main() void {
 
     const allocator = arena.allocator();
 
-    const input = "{if true}{2 + 2 > 4}{/if}";
+    const input = \\
+        \\ // tags
+        \\ <style>
+        \\   html {
+        \\     color: ${value};
+        \\   }
+        \\ </style>
+        \\ 
+        \\ <script>
+        \\   if (true) {
+        \\     const test = ${value};
+        \\   }
+        \\ </script>
+        \\ 
+        \\ // expressions
+        \\ <div>{2 + 2}</div>
+        \\ <div>{2 + 2 == 4 ? 'yes' : 'no'}</div>
+        \\ <div>{item}</div>
+        \\ <div>{item.id}</div>
+        \\ <div>{item[var].id}</div>
+        \\ 
+        \\ // loop
+        \\ {for item, index in items}
+        \\     <!-- ... -->
+        \\ {/for}
+        \\ 
+        \\ // if block
+        \\ {if condition}
+        \\     <!-- ... -->
+        \\ {else if condition_2}
+        \\     <!-- ... -->
+        \\ {else}
+        \\     <!-- ... -->
+        \\ {/if}
+        \\ 
+        \\ // switch block
+        \\ {switch var}
+        \\   {case 2 + 2}
+        \\     <!-- ... -->
+        \\ 
+        \\   {case 'test_1', 'test_2'}
+        \\     <!-- ... -->
+        \\ 
+        \\   {default}
+        \\     <!-- ... -->
+        \\ {/switch}
+    ;
+
     var lexer = Lexer.init(input, allocator);
 
     const tokens = lexer.tokenize() catch |err| {
@@ -1713,9 +1779,14 @@ pub fn main() void {
 
     var parser = Parser.init(tokens, allocator);
 
-    const ast = parser.parse() catch |err| switch (err) {
+    _ = parser.parse() catch |err| switch (err) {
         ParseError.OutOfMemory => {
             std.debug.print("Parse error: Out of memory\n", .{});
+            return;
+        },
+
+        ParseError.UnknownToken => {
+            std.debug.print("Parse error: Unknown token\n", .{});
             return;
         },
 
@@ -1744,83 +1815,4 @@ pub fn main() void {
             return;
         },
     };
-
-    print_ast(&ast, 0);
-}
-
-fn print_ast(node: *const Node, indent: usize) void {
-    const spaces = "                                        ";
-    const prefix = spaces[0..@min(indent * 2, spaces.len)];
-
-    switch (node.*) {
-        .program => |prog| {
-            std.debug.print("{s}PROGRAM:\n", .{prefix});
-            std.debug.print("{s}  BLOCK [{}]:\n", .{ prefix, prog.root.block.len });
-
-            for (prog.root.block) |*child| {
-                print_ast(child, indent + 2);
-            }
-        },
-
-        .block => |block| {
-            std.debug.print("{s}BLOCK [{}]:\n", .{ prefix, block.block.len });
-
-            for (block.block) |*child| {
-                print_ast(child, indent + 1);
-            }
-        },
-
-        .block_if => |block| {
-            std.debug.print("{s}BLOCK [{}]:\n", .{ prefix, block.block.len });
-
-            for (block.block) |*child| {
-                print_ast(child, indent + 1);
-            }
-        },
-
-        .text => |text| {
-            std.debug.print("{s}TEXT: \"{s}\"\n", .{ prefix, text.value });
-        },
-
-        .expression => |expr| {
-            std.debug.print("{s}EXPRESSION:\n", .{prefix});
-            print_expression(expr.expr, indent + 1);
-        },
-
-        else => std.debug.print("{any}\n", .{ node.* }),
-    }
-}
-
-fn print_expression(node: *Node, indent: usize) void {
-    const spaces = "                                        ";
-    const prefix = spaces[0..@min(indent * 2, spaces.len)];
-
-    switch (node.*) {
-        .literal_int => |lit| std.debug.print("{s}INT: {}\n", .{ prefix, lit.value }),
-        .literal_float => |lit| std.debug.print("{s}FLOAT: {d}\n", .{ prefix, lit.value }),
-        .literal_string => |lit| std.debug.print("{s}STRING: \"{s}\"\n", .{ prefix, lit.value }),
-        .literal_boolean => |lit| std.debug.print("{s}BOOL: {}\n", .{ prefix, lit.value }),
-        .identifier => |id| std.debug.print("{s}ID: {s}\n", .{ prefix, id.name }),
-        .expression_binary => |bin| {
-            std.debug.print("{s}BINARY: {s}\n", .{ prefix, @tagName(bin.operator) });
-            print_expression(bin.left, indent + 1);
-            print_expression(bin.right, indent + 1);
-        },
-        .expression_unary => |un| {
-            std.debug.print("{s}UNARY: {s}\n", .{ prefix, @tagName(un.operator) });
-            print_expression(un.operand, indent + 1);
-        },
-        else => std.debug.print("{s}OTHER: {s}\n", .{ prefix, @tagName(node.*) }),
-    }
-}
-
-fn json(ast: Node, allocator: std.mem.Allocator) !void {
-    const fmt = std.json.fmt(ast, .{ .whitespace = .indent_2 });
-
-    var writer = std.Io.Writer.Allocating.init(allocator);
-    try fmt.format(&writer.writer);
-
-    const output = try writer.toOwnedSlice();
-
-    std.debug.print("{s}", .{output});
 }
