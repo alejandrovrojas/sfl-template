@@ -912,12 +912,10 @@ pub const Lexer = struct {
 
 pub const ParseError = error{
     OutOfMemory,
+    InvalidSyntax,
     UnknownToken,
     UnexpectedToken,
-    UnexpectedEndOfInput,
-    InvalidExpression,
-    InvalidSyntax,
-    InvalidBlockStructure,
+    UnexpectedEndOfFile
 };
 
 pub const NodeType = enum {
@@ -1047,9 +1045,9 @@ pub const Identifier = struct {
 };
 
 pub const Parser = struct {
-    tokens:        []Token,
-    allocator:     std.mem.Allocator,
-    cursor:        u32,
+    tokens:    []Token,
+    allocator: std.mem.Allocator,
+    cursor:    u32,
 
     pub fn init(tokens: []Token, allocator: std.mem.Allocator) Parser {
         const parser = Parser{
@@ -1061,7 +1059,7 @@ pub const Parser = struct {
         return parser;
     }
 
-    fn current_token(self: *Parser) ?Token {
+    pub fn current_token(self: *Parser) ?Token {
         if (self.cursor >= self.tokens.len) {
             return null;
         }
@@ -1085,11 +1083,10 @@ pub const Parser = struct {
 
     fn expect_token(self: *Parser, expected_type: TokenType) ParseError!void {
         const token = self.current_token() orelse {
-            return ParseError.UnexpectedEndOfInput;
+            return ParseError.UnexpectedEndOfFile;
         };
 
         if (token.type != expected_type) {
-            std.debug.print("{s}, {any}", .{ token.value, token.type });
             return ParseError.UnexpectedToken;
         }
 
@@ -1356,7 +1353,6 @@ pub const Parser = struct {
                     self.advance_token();
 
                     const node = try self.allocator.create(Node);
-
                     node.* = Node{
                         .literal_null = LiteralNull{
                             .value = 0
@@ -1370,7 +1366,6 @@ pub const Parser = struct {
                     self.advance_token();
 
                     const node = try self.allocator.create(Node);
-
                     node.* = Node{
                         .literal_int = LiteralInt{
                             .value = std.fmt.parseInt(i64, token.value, 10) catch {
@@ -1386,7 +1381,6 @@ pub const Parser = struct {
                     self.advance_token();
 
                     const node = try self.allocator.create(Node);
-
                     node.* = Node{
                         .literal_float = LiteralFloat{
                             .value = std.fmt.parseFloat(f64, token.value) catch {
@@ -1402,7 +1396,6 @@ pub const Parser = struct {
                     self.advance_token();
 
                     const node = try self.allocator.create(Node);
-
                     node.* = Node{
                         .literal_string = LiteralString{
                             .value = token.value
@@ -1416,7 +1409,6 @@ pub const Parser = struct {
                     self.advance_token();
 
                     const node = try self.allocator.create(Node);
-
                     node.* = Node{
                         .literal_boolean = LiteralBoolean{
                             .value = std.mem.eql(u8, token.value, "true")
@@ -1430,7 +1422,6 @@ pub const Parser = struct {
                     self.advance_token();
 
                     const node = try self.allocator.create(Node);
-
                     node.* = Node{
                         .identifier = Identifier{
                             .name = token.value
@@ -1444,7 +1435,6 @@ pub const Parser = struct {
                     self.advance_token();
 
                     const expr = try self.parse_expression();
-
                     try self.expect_token(.r_paren);
 
                     return expr;
@@ -1456,7 +1446,7 @@ pub const Parser = struct {
             }
         }
 
-        return ParseError.UnexpectedEndOfInput;
+        return ParseError.UnexpectedEndOfFile;
     }
 
     fn parse_switch_block(self: *Parser) ParseError!Node {
@@ -1490,7 +1480,7 @@ pub const Parser = struct {
                     return ParseError.UnexpectedToken;
                 }
             } else {
-                return ParseError.UnexpectedEndOfInput;
+                return ParseError.UnexpectedEndOfFile;
             }
         }
 
@@ -1622,7 +1612,7 @@ pub const Parser = struct {
     }
 
     fn parse_until(self: *Parser, end_tokens: []const TokenType) ParseError![]Node {
-        var nodes = std.ArrayList(Node){};
+        var nodes: std.ArrayList(Node) = .empty;
 
         while (self.current_token()) |_| {
             const next = self.peek_token();
@@ -1639,12 +1629,12 @@ pub const Parser = struct {
             try nodes.append(self.allocator, node);
         }
 
-        return ParseError.UnexpectedEndOfInput;
+        return ParseError.UnexpectedEndOfFile;
     }
 
     fn parse_statement(self: *Parser) ParseError!Node {
         const token = self.current_token() orelse {
-            return ParseError.UnexpectedEndOfInput;
+            return ParseError.UnexpectedEndOfFile;
         };
 
         switch (token.type) {
@@ -1720,7 +1710,7 @@ pub const Parser = struct {
                     }
                 } else {
                     self.advance_token();
-                    return ParseError.UnexpectedEndOfInput;
+                    return ParseError.UnexpectedEndOfFile;
                 }
             },
 
@@ -1817,38 +1807,66 @@ pub fn main() void {
 
     _ = parser.parse() catch |err| switch (err) {
         ParseError.OutOfMemory => {
-            std.debug.print("Parse error: Out of memory\n", .{});
+            const t = parser.current_token();
+
+            std.debug.print("OutOfMemory (line {}, col {}) \n", .{ 
+                t.?.position.line,
+                t.?.position.column
+            });
+
             return;
         },
 
         ParseError.UnknownToken => {
-            std.debug.print("Parse error: Unknown token\n", .{});
+            const t = parser.current_token();
+
+            std.debug.print("Unknown token \"{s}\" [{any}] (line {}, col {}) \n", .{ 
+                t.?.value,
+                t.?.type,
+                t.?.position.line,
+                t.?.position.column
+            });
+
             return;
         },
 
         ParseError.UnexpectedToken => {
-            std.debug.print("Parse error: Unexpected token encountered\n", .{});
+            const t = parser.current_token();
+
+            std.debug.print("Unexpected token \"{s}\" [{any}] (line {}, col {}) \n", .{ 
+                t.?.value,
+                t.?.type,
+                t.?.position.line,
+                t.?.position.column
+            });
+
             return;
         },
 
-        ParseError.UnexpectedEndOfInput => {
-            std.debug.print("Parse error: Unexpected end of input\n", .{});
-            return;
-        },
+        ParseError.UnexpectedEndOfFile => {
+            const t = parser.current_token();
 
-        ParseError.InvalidExpression => {
-            std.debug.print("Parse error: Unsupported expression syntax\n", .{});
+            std.debug.print("Unexpected EOF \"{s}\" [{any}] (line {}, col {}) \n", .{ 
+                t.?.value,
+                t.?.type,
+                t.?.position.line,
+                t.?.position.column
+            });
+
             return;
         },
 
         ParseError.InvalidSyntax => {
-            std.debug.print("Parse error: Invalid syntax\n", .{});
-            return;
-        },
+            const t = parser.current_token();
 
-        ParseError.InvalidBlockStructure => {
-            std.debug.print("Parse error: Invalid block structure\n", .{});
+            std.debug.print("Unexpected token: \"{s}\" [{any}] (line {}, col {}) \n", .{ 
+                t.?.value,
+                t.?.type,
+                t.?.position.line,
+                t.?.position.column
+            });
+
             return;
-        },
+        }
     };
 }
