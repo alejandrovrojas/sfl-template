@@ -150,8 +150,8 @@ test "for loop basic" {
     try testing.expect(ast.program.root.block[0] == .block_for);
 
     const for_block = ast.program.root.block[0].block_for;
-    try testing.expectEqualStrings("item", for_block.item_var);
-    try testing.expect(for_block.index_var == null);
+    try testing.expectEqualStrings("item", for_block.iterator);
+    try testing.expect(for_block.iterator_index == null);
     try testing.expect(for_block.iterable.* == .identifier);
     try testing.expectEqualStrings("items", for_block.iterable.identifier.name);
     try testing.expect(for_block.body.block.len == 1);
@@ -175,8 +175,8 @@ test "for loop with index" {
     try testing.expect(ast.program.root.block[0] == .block_for);
 
     const for_block = ast.program.root.block[0].block_for;
-    try testing.expectEqualStrings("user", for_block.item_var);
-    try testing.expectEqualStrings("index", for_block.index_var.?);
+    try testing.expectEqualStrings("user", for_block.iterator);
+    try testing.expectEqualStrings("index", for_block.iterator_index.?);
     try testing.expect(for_block.iterable.* == .identifier);
     try testing.expectEqualStrings("users", for_block.iterable.identifier.name);
 }
@@ -200,12 +200,12 @@ test "nested for loops" {
     try testing.expect(ast.program.root.block[0] == .block_for);
 
     const outer_for = ast.program.root.block[0].block_for;
-    try testing.expectEqualStrings("category", outer_for.item_var);
+    try testing.expectEqualStrings("category", outer_for.iterator);
     try testing.expect(outer_for.body.block.len == 1);
     try testing.expect(outer_for.body.block[0] == .block_for);
 
     const inner_for = outer_for.body.block[0].block_for;
-    try testing.expectEqualStrings("product", inner_for.item_var);
+    try testing.expectEqualStrings("product", inner_for.iterator);
     try testing.expectEqualStrings("products", inner_for.iterable.identifier.name);
 }
 
@@ -376,9 +376,9 @@ fn print_ast(node: *const template.Node, indent: usize) void {
 
         .block_for => |for_block| {
             print("{s}FOR:\n", .{prefix});
-            print("{s}  ITEM_VAR: \"{s}\"\n", .{ prefix, for_block.item_var });
-            if (for_block.index_var) |index_var| {
-                print("{s}  INDEX_VAR: \"{s}\"\n", .{ prefix, index_var });
+            print("{s}  ITEM_VAR: \"{s}\"\n", .{ prefix, for_block.iterator });
+            if (for_block.iterator_index) |iterator_index| {
+                print("{s}  INDEX_VAR: \"{s}\"\n", .{ prefix, iterator_index });
             }
             print("{s}  ITERABLE:\n", .{prefix});
             print_ast(for_block.iterable, indent + 2);
@@ -408,7 +408,17 @@ fn print_ast(node: *const template.Node, indent: usize) void {
 
         .expression => |expr| {
             print("{s}EXPRESSION:\n", .{prefix});
-            print_ast(expr.expr, indent + 1);
+            print_ast(expr.value, indent + 1);
+        },
+
+        .expression_conditional => |cond| {
+            print("{s}EXPRESSION CONDITIONAL:\n", .{prefix});
+            print("{s}  CONDITION:\n", .{prefix});
+            print_ast(cond.condition, indent + 2);
+            print("{s}  CONSEQUENT:\n", .{prefix});
+            print_ast(cond.consequent, indent + 2);
+            print("{s}  ALTERNATE:\n", .{prefix});
+            print_ast(cond.alternate, indent + 2);
         },
 
         .expression_binary => |binary| {

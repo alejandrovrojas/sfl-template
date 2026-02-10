@@ -995,8 +995,8 @@ pub const Case = struct {
 };
 
 pub const For = struct {
-    item_var: []const u8,
-    index_var: ?[]const u8,
+    iterator: []const u8,
+    iterator_index: ?[]const u8,
     iterable: *Node,
     body: Block,
 };
@@ -1602,8 +1602,8 @@ pub const Parser = struct {
 
         return Node{
             .block_for = For{
-                .item_var = iterator,
-                .index_var = iterator_index,
+                .iterator = iterator,
+                .iterator_index = iterator_index,
                 .iterable = iterable,
                 .body = Block{ .block = body_nodes },
             },
@@ -1611,12 +1611,12 @@ pub const Parser = struct {
     }
 
     fn parse_expression_block(self: *Parser) ParseError!Node {
-        const expr = try self.parse_expression();
+        const expression = try self.parse_expression();
         try self.expect_token(.expr_end);
 
         return Node{
             .expression = Expression{
-                .expr = expr,
+                .value = expression,
             },
         };
     }
