@@ -935,29 +935,31 @@ pub const NodeType = enum {
     literal_string,
     literal_boolean,
     expression,
+    expression_conditional,
     expression_binary,
     expression_unary,
     identifier,
 };
 
 pub const Node = union(NodeType) {
-    program:           Program,
-    block:             Block,
-    text:              Text,
-    comment:           Comment,
-    block_if:          If,
-    block_switch:      Switch,
-    block_case:        Case,
-    block_for:         For,
-    literal_null:      LiteralNull,
-    literal_int:       LiteralInt,
-    literal_float:     LiteralFloat,
-    literal_string:    LiteralString,
-    literal_boolean:   LiteralBoolean,
-    expression:        Expression,
-    expression_binary: ExpressionBinary,
-    expression_unary:  ExpressionUnary,
-    identifier:        Identifier,
+    program:                Program,
+    block:                  Block,
+    text:                   Text,
+    comment:                Comment,
+    block_if:               If,
+    block_switch:           Switch,
+    block_case:             Case,
+    block_for:              For,
+    literal_null:           LiteralNull,
+    literal_int:            LiteralInt,
+    literal_float:          LiteralFloat,
+    literal_string:         LiteralString,
+    literal_boolean:        LiteralBoolean,
+    expression:             Expression,
+    expression_conditional: ExpressionConditional,
+    expression_binary:      ExpressionBinary,
+    expression_unary:       ExpressionUnary,
+    identifier:             Identifier,
 };
 
 pub const Program = struct {
@@ -1019,6 +1021,16 @@ pub const LiteralNull = struct {
     value: i8
 };
 
+pub const Expression = struct {
+    value: *Node,
+};
+
+pub const ExpressionConditional = struct {
+    condition: *Node,
+    consequent: *Node,
+    alternate: *Node,
+};
+
 pub const ExpressionBinary = struct {
     left: *Node,
     operator: TokenType,
@@ -1032,10 +1044,6 @@ pub const ExpressionUnary = struct {
 
 pub const Identifier = struct {
     name: []const u8,
-};
-
-pub const Expression = struct {
-    expr: *Node,
 };
 
 pub const Parser = struct {
@@ -1200,32 +1208,60 @@ pub const Parser = struct {
     }
 
     fn parse_expression(self: *Parser) ParseError!*Node {
-        return self.parse_logical_or();
+        return self.parse_conditional_expression();
+    }
+
+    fn parse_conditional_expression(self: *Parser) ParseError!*Node {
+        const left = try self.parse_logical_or();
+
+        while (self.current_token()) |token| {
+            if (token.type != .question_mark) {
+                break;
+            }
+
+            self.advance_token();
+
+            const consequent = try self.parse_expression();
+
+            try self.expect_token(.colon);
+
+            const alternate = try self.parse_expression();
+            const conditional = try self.allocator.create(Node);
+
+            conditional.* = Node{
+                .expression_conditional = ExpressionConditional{
+                    .condition = left,
+                    .consequent = consequent,
+                    .alternate = alternate,
+                }
+            };
+
+            return conditional;
+        }
+
+        return left;
     }
 
     fn parse_binary_expression(self: *Parser, operators: []const TokenType, subexpression: fn(p: *Parser) ParseError!*Node) ParseError!*Node {
         var left = try subexpression(self);
 
         while (self.current_token()) |token| {
-            const is_token_operator = for (operators) |op| {
-                if (token.type == op) {
-                    break true;
-                }
-            } else false;
-
-            if (!is_token_operator) {
+            if (!self.is_current_token_any(operators)) {
                 break;
             }
 
+            const operator = token.type;
+
             self.advance_token();
 
+            const right = try subexpression(self);
             const binary = try self.allocator.create(Node);
 
             binary.* = Node{
                 .expression_binary = ExpressionBinary{
                     .left = left,
-                    .operator = token.type,
-                    .right = try subexpression(self)
+                    .operator = operator,
+                    .right = right
                 }
             };
 

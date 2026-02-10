@@ -518,3 +518,20 @@ test "ast if block structure" {
     try testing.expect(ast.program.root.block.len == 1);
     try testing.expect(ast.program.root.block[0] == .block_if);
 }
+
+test "ast expression conditional" {
+    const test_input =
+        \\{1 ? 2 : 3}
+    ;
+
+    var lexer = template.Lexer.init(test_input, allocator);
+    const tokens = lexer.tokenize() catch unreachable;
+
+    var parser = template.Parser.init(tokens, allocator);
+    const ast = parser.parse() catch unreachable;
+
+    print_ast(&ast, 0);
+
+    try testing.expect(ast.program.root.block.len == 1);
+    try testing.expect(ast.program.root.block[0] == .expression);
+}
