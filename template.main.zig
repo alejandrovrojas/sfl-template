@@ -1,6 +1,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+pub const ParseError = error{
+    OutOfMemory,
+    InvalidSyntax,
+    UnknownToken,
+    UnexpectedToken,
+    UnexpectedEndOfFile
+};
+
 pub const TokenType = enum {
     eof,
     comment,
@@ -900,6 +908,7 @@ pub const Lexer = struct {
 
     pub fn tokenize(self: *Lexer) ![]Token {
         var tokens: std.ArrayList(Token) = .empty;
+        defer tokens.deinit(self.allocator);
 
         while (self.current_ch()) |_| {
             const token = self.tokenize_lexeme();
@@ -908,14 +917,6 @@ pub const Lexer = struct {
 
         return try tokens.toOwnedSlice(self.allocator);
     }
-};
-
-pub const ParseError = error{
-    OutOfMemory,
-    InvalidSyntax,
-    UnknownToken,
-    UnexpectedToken,
-    UnexpectedEndOfFile
 };
 
 pub const NodeType = enum {
@@ -937,6 +938,8 @@ pub const NodeType = enum {
     expression_binary,
     expression_unary,
     identifier,
+    function_call,
+    argument_list,
 };
 
 pub const Node = union(NodeType) {
@@ -958,6 +961,8 @@ pub const Node = union(NodeType) {
     expression_binary:      ExpressionBinary,
     expression_unary:       ExpressionUnary,
     identifier:             Identifier,
+    function_call:          FunctionCall,
+    argument_list:          ArgumentList,
 };
 
 pub const Program = struct {
@@ -976,6 +981,20 @@ pub const Text = struct {
     value: []const u8,
 };
 
+pub const FunctionCall = struct {
+    identifier: *Node,
+    args: *Node,
+};
+
+pub const ArgumentList = struct {
+    args: []*Node,
+};
+
+// @todo -- could be nested instead of a flat list?
+pub const MemberAccess = struct {
+    members: []Node,
+};
+
 pub const If = struct {
     condition: *Node,
     consequent: Block,
@@ -988,7 +1007,7 @@ pub const Switch = struct {
 };
 
 pub const Case = struct {
-    values: ?[]*Node,
+    values: *Node,
     body: Block,
 };
 
@@ -997,26 +1016,6 @@ pub const For = struct {
     iterator_index: ?[]const u8,
     iterable: *Node,
     body: Block,
-};
-
-pub const LiteralInt = struct {
-    value: i64,
-};
-
-pub const LiteralFloat = struct {
-    value: f64,
-};
-
-pub const LiteralString = struct {
-    value: []const u8,
-};
-
-pub const LiteralBoolean = struct {
-    value: bool,
-};
-
-pub const LiteralNull = struct {
-    value: i8
 };
 
 pub const Expression = struct {
@@ -1042,6 +1041,26 @@ pub const ExpressionUnary = struct {
 
 pub const Identifier = struct {
     name: []const u8,
+};
+
+pub const LiteralInt = struct {
+    value: i64,
+};
+
+pub const LiteralFloat = struct {
+    value: f64,
+};
+
+pub const LiteralString = struct {
+    value: []const u8,
+};
+
+pub const LiteralBoolean = struct {
+    value: bool,
+};
+
+pub const LiteralNull = struct {
+    value: i8
 };
 
 pub const Parser = struct {
@@ -1113,28 +1132,53 @@ pub const Parser = struct {
         return false;
     }
 
-    fn parse_text(_: *Parser, token: Token) Node {
-        return Node{
+    fn parse_until(self: *Parser, end_tokens: []const TokenType) ParseError![]Node {
+        var nodes: std.ArrayList(Node) = .empty;
+        defer nodes.deinit(self.allocator);
+
+        while (self.current_token()) |_| {
+            const next = self.peek_token();
+
+            if (next) |next_token| {
+                for (end_tokens) |end_token| {
+                    if (next_token.type == end_token) {
+                        return try nodes.toOwnedSlice(self.allocator);
+                    }
+                }
+            }
+
+            const node = try self.parse_statement();
+            try nodes.append(self.allocator, node.*);
+        }
+
+        return try nodes.toOwnedSlice(self.allocator);
+    }
+
+    fn parse_text(self: *Parser, token: Token) ParseError!*Node {
+        const node = try self.allocator.create(Node);
+        node.* = Node{
             .text = Text{
                 .value = token.value,
             },
         };
+        return node;
     }
 
-    fn parse_comment(_: *Parser, token: Token) Node {
-        return Node{
+    fn parse_comment(self: *Parser, token: Token) ParseError!*Node {
+        const node = try self.allocator.create(Node);
+        node.* = Node{
             .comment = Comment{
                 .value = token.value,
             },
         };
+        return node;
     }
 
-    fn parse_if_block(self: *Parser) ParseError!Node {
+    fn parse_if_block(self: *Parser) ParseError!*Node {
         return self.parse_if_sequence(false);
     }
 
-    fn parse_if_sequence(self: *Parser, is_nested: bool) ParseError!Node {
-        // @note -- omit self.expect_token(.expr_start) because this could be an else-if block
+    fn parse_if_sequence(self: *Parser, is_nested: bool) ParseError!*Node {
         try self.expect_token(.if_start);
 
         const condition = try self.parse_expression();
@@ -1161,7 +1205,7 @@ pub const Parser = struct {
 
                     const else_block = try self.allocator.create(Node);
 
-                    else_block.* = try self.parse_else_block();
+                    else_block.* = (try self.parse_else_block()).*;
                     alternate = else_block;
                 }
             }
@@ -1173,16 +1217,18 @@ pub const Parser = struct {
             try self.expect_token(.expr_end);
         }
 
-        return Node{
+        const node = try self.allocator.create(Node);
+        node.* = Node{
             .block_if = If{
                 .condition = condition,
                 .consequent = consequent,
                 .alternate = alternate,
             },
         };
+        return node;
     }
 
-    fn parse_else_block(self: *Parser) ParseError!Node {
+    fn parse_else_block(self: *Parser) ParseError!*Node {
         try self.expect_token(.else_start);
 
         if (self.is_current_token(.if_start)) {
@@ -1197,15 +1243,184 @@ pub const Parser = struct {
 
         const body_nodes = try self.parse_until(&end_tokens);
 
-        return Node{
+        const node = try self.allocator.create(Node);
+        node.* = Node{
             .block = Block{
                 .block = body_nodes,
             },
         };
+        return node;
+    }
+
+    fn parse_switch_block(self: *Parser) ParseError!*Node {
+        try self.expect_token(.switch_start);
+
+        const expression = try self.parse_expression();
+
+        try self.expect_token(.expr_end);
+
+        var case_nodes: std.ArrayList(Node) = .empty;
+        defer case_nodes.deinit(self.allocator);
+
+        while (self.current_token()) |_| {
+            const next = self.peek_token();
+
+            if (next) |next_token| {
+                if (next_token.type == .switch_end) {
+                    try self.expect_token(.expr_start);
+                    try self.expect_token(.switch_end);
+                    try self.expect_token(.expr_end);
+                    break;
+                }
+
+                if (next_token.type == .case_start) {
+                    self.advance_token();
+                    try case_nodes.append(self.allocator, (try self.parse_case_block()).*);
+                } else if (next_token.type == .default_start) {
+                    self.advance_token();
+                    try case_nodes.append(self.allocator, (try self.parse_default_block()).*);
+                } else {
+                    self.advance_token();
+                    return ParseError.UnexpectedToken;
+                }
+            } else {
+                return ParseError.UnexpectedEndOfFile;
+            }
+        }
+
+        const switch_node = try self.allocator.create(Node);
+        switch_node.* = Node{
+            .block_switch = Switch{
+                .expression = expression,
+                .cases = try case_nodes.toOwnedSlice(self.allocator),
+            },
+        };
+        return switch_node;
+    }
+
+    fn parse_case_block(self: *Parser) ParseError!*Node {
+        try self.expect_token(.case_start);
+
+        const case_values = try self.parse_case_values();
+
+        try self.expect_token(.expr_end);
+
+        const body_nodes = try self.parse_until(&[_]TokenType{
+            .case_start,
+            .default_start,
+            .switch_end
+        });
+
+        const case_node = try self.allocator.create(Node);
+        case_node.* = Node{
+            .block_case = Case{
+                .values = case_values,
+                .body = Block{
+                    .block = body_nodes
+                },
+            },
+        };
+        return case_node;
+    }
+
+    fn parse_default_block(self: *Parser) ParseError!*Node {
+        try self.expect_token(.default_start);
+        try self.expect_token(.expr_end);
+
+        const body_nodes = try self.parse_until(&[_]TokenType{
+            .switch_end
+        });
+
+        const empty_values = try self.allocator.create(Node);
+        empty_values.* = Node{
+            .argument_list = ArgumentList{
+                .args = &[_]*Node{},
+            }
+        };
+
+        const default_node = try self.allocator.create(Node);
+        default_node.* = Node{
+            .block_case = Case{
+                .values = empty_values,
+                .body = Block{
+                    .block = body_nodes,
+                },
+            },
+        };
+        return default_node;
+    }
+
+    fn parse_for_block(self: *Parser) ParseError!*Node {
+        try self.expect_token(.for_start);
+
+        var iterator: []const u8 = "";
+
+        if (self.current_token()) |token| {
+            if (token.type == .identifier) {
+                iterator = token.value;
+                self.advance_token();
+            } else {
+                return ParseError.UnexpectedToken;
+            }
+        }
+
+        var iterator_index: ?[]const u8 = null;
+
+        if (self.is_current_token(.comma)) {
+            self.advance_token();
+
+            if (self.current_token()) |token| {
+                if (token.type == .identifier) {
+                    iterator_index = token.value;
+                    self.advance_token();
+                } else {
+                    return ParseError.UnexpectedToken;
+                }
+            }
+        }
+
+        try self.expect_token(.for_in);
+
+        const iterable = try self.parse_expression();
+
+        try self.expect_token(.expr_end);
+
+        const body_nodes = try self.parse_until(&[_]TokenType{
+            .for_end
+        });
+
+        try self.expect_token(.expr_start);
+        try self.expect_token(.for_end);
+        try self.expect_token(.expr_end);
+
+        const node = try self.allocator.create(Node);
+        node.* = Node{
+            .block_for = For{
+                .iterator = iterator,
+                .iterator_index = iterator_index,
+                .iterable = iterable,
+                .body = Block{ .block = body_nodes },
+            },
+        };
+        return node;
     }
 
     fn parse_expression(self: *Parser) ParseError!*Node {
         return self.parse_conditional_expression();
+    }
+
+    fn parse_expression_block(self: *Parser) ParseError!*Node {
+        const expression = try self.parse_expression();
+        try self.expect_token(.expr_end);
+
+        const expr_node = try self.allocator.create(Node);
+        expr_node.* = Node{
+            .expression = Expression{
+                .value = expression,
+            },
+        };
+
+        return expr_node;
     }
 
     fn parse_conditional_expression(self: *Parser) ParseError!*Node {
@@ -1419,16 +1634,44 @@ pub const Parser = struct {
                 },
 
                 .identifier => {
+                    const identifier_name = token.value;
                     self.advance_token();
 
-                    const node = try self.allocator.create(Node);
-                    node.* = Node{
+                    if (self.current_token()) |current| {
+                        if (current.type == .l_paren) {
+                            self.advance_token();
+
+                            const argument_list = try self.parse_argument_list();
+
+                            try self.expect_token(.r_paren);
+
+                            const identifier_node = try self.allocator.create(Node);
+                            identifier_node.* = Node{
+                                .identifier = Identifier{
+                                    .name = identifier_name,
+                                }
+                            };
+
+                            const function_call = try self.allocator.create(Node);
+                            function_call.* = Node{
+                                .function_call = FunctionCall{
+                                    .identifier = identifier_node,
+                                    .args = argument_list,
+                                }
+                            };
+
+                            return function_call;
+                        }
+                    }
+
+                    const identifier = try self.allocator.create(Node);
+                    identifier.* = Node{
                         .identifier = Identifier{
-                            .name = token.value
+                            .name = identifier_name,
                         }
                     };
 
-                    return node;
+                    return identifier;
                 },
 
                 .l_paren => {
@@ -1449,190 +1692,76 @@ pub const Parser = struct {
         return ParseError.UnexpectedEndOfFile;
     }
 
-    fn parse_switch_block(self: *Parser) ParseError!Node {
-        try self.expect_token(.switch_start);
+    fn parse_argument_list(self: *Parser) ParseError!*Node {
+        var args: std.ArrayList(*Node) = .empty;
+        defer args.deinit(self.allocator);
 
-        const expression = try self.parse_expression();
-
-        try self.expect_token(.expr_end);
-
-        var cases: std.ArrayList(Node) = .empty;
-
-        while (self.current_token()) |_| {
-            const next = self.peek_token();
-
-            if (next) |next_token| {
-                if (next_token.type == .switch_end) {
-                    try self.expect_token(.expr_start);
-                    try self.expect_token(.switch_end);
-                    try self.expect_token(.expr_end);
-                    break;
+        if (self.is_current_token(.r_paren)) {
+            const arg_list = try self.allocator.create(Node);
+            arg_list.* = Node{
+                .argument_list = ArgumentList{
+                    .args = try args.toOwnedSlice(self.allocator),
                 }
-
-                if (next_token.type == .case_start) {
-                    self.advance_token();
-                    try cases.append(self.allocator, try self.parse_case_block());
-                } else if (next_token.type == .default_start) {
-                    self.advance_token();
-                    try cases.append(self.allocator, try self.parse_default_block());
-                } else {
-                    self.advance_token();
-                    return ParseError.UnexpectedToken;
-                }
-            } else {
-                return ParseError.UnexpectedEndOfFile;
-            }
+            };
+            return arg_list;
         }
 
-        return Node{
-            .block_switch = Switch{
-                .expression = expression,
-                .cases = try cases.toOwnedSlice(self.allocator),
-            },
-        };
-    }
+        const first_arg = try self.parse_expression();
+        try args.append(self.allocator, first_arg);
 
-    fn parse_case_block(self: *Parser) ParseError!Node {
-        try self.expect_token(.case_start);
-
-        var case_values: std.ArrayList(*Node) = .empty;
-
-        while (self.current_token()) |token| {
-            if (token.type == .expr_end) {
-                break;
-            }
-
-            const expr = try self.parse_expression();
-
-            try case_values.append(self.allocator, expr);
-
-            if (self.is_current_token(.comma)) {
-                self.advance_token();
-            }
-        }
-
-        try self.expect_token(.expr_end);
-
-        const body_nodes = try self.parse_until(&[_]TokenType{
-            .case_start,
-            .default_start,
-            .switch_end
-        });
-
-        return Node{
-            .block_case = Case{
-                .values = try case_values.toOwnedSlice(self.allocator),
-                .body = Block{
-                    .block = body_nodes
-                },
-            },
-        };
-    }
-
-    fn parse_default_block(self: *Parser) ParseError!Node {
-        try self.expect_token(.default_start);
-        try self.expect_token(.expr_end);
-
-        const body_nodes = try self.parse_until(&[_]TokenType{
-            .switch_end
-        });
-
-        return Node{
-            .block_case = Case{
-                .values = null,
-                .body = Block{
-                    .block = body_nodes,
-                },
-            },
-        };
-    }
-
-    fn parse_for_block(self: *Parser) ParseError!Node {
-        try self.expect_token(.for_start);
-
-        var iterator: []const u8 = "";
-
-        if (self.current_token()) |token| {
-            if (token.type == .identifier) {
-                iterator = token.value;
-                self.advance_token();
-            } else {
-                return ParseError.UnexpectedToken;
-            }
-        }
-
-        var iterator_index: ?[]const u8 = null;
-
-        if (self.is_current_token(.comma)) {
+        while (self.is_current_token(.comma)) {
             self.advance_token();
-
-            if (self.current_token()) |token| {
-                if (token.type == .identifier) {
-                    iterator_index = token.value;
-                    self.advance_token();
-                } else {
-                    return ParseError.UnexpectedToken;
-                }
-            }
+            const arg = try self.parse_expression();
+            try args.append(self.allocator, arg);
         }
 
-        try self.expect_token(.for_in);
-
-        const iterable = try self.parse_expression();
-
-        try self.expect_token(.expr_end);
-
-        const body_nodes = try self.parse_until(&[_]TokenType{
-            .for_end
-        });
-
-        try self.expect_token(.expr_start);
-        try self.expect_token(.for_end);
-        try self.expect_token(.expr_end);
-
-        return Node{
-            .block_for = For{
-                .iterator = iterator,
-                .iterator_index = iterator_index,
-                .iterable = iterable,
-                .body = Block{ .block = body_nodes },
-            },
-        };
-    }
-
-    fn parse_expression_block(self: *Parser) ParseError!Node {
-        const expression = try self.parse_expression();
-        try self.expect_token(.expr_end);
-
-        return Node{
-            .expression = Expression{
-                .value = expression,
-            },
-        };
-    }
-
-    fn parse_until(self: *Parser, end_tokens: []const TokenType) ParseError![]Node {
-        var nodes: std.ArrayList(Node) = .empty;
-
-        while (self.current_token()) |_| {
-            const next = self.peek_token();
-
-            if (next) |next_token| {
-                for (end_tokens) |end_token| {
-                    if (next_token.type == end_token) {
-                        return try nodes.toOwnedSlice(self.allocator);
-                    }
-                }
+        const arg_list = try self.allocator.create(Node);
+        arg_list.* = Node{
+            .argument_list = ArgumentList{
+                .args = try args.toOwnedSlice(self.allocator),
             }
+        };
 
-            const node = try self.parse_statement();
-            try nodes.append(self.allocator, node);
+        return arg_list;
+    }
+
+    fn parse_case_values(self: *Parser) ParseError!*Node {
+        var args: std.ArrayList(*Node) = .empty;
+        defer args.deinit(self.allocator);
+
+        // handle empty case values (shouldn't happen but defensive)
+        if (self.is_current_token(.expr_end)) {
+            const arg_list = try self.allocator.create(Node);
+            arg_list.* = Node{
+                .argument_list = ArgumentList{
+                    .args = try args.toOwnedSlice(self.allocator),
+                }
+            };
+            return arg_list;
         }
 
-        return ParseError.UnexpectedEndOfFile;
+        // parse first value
+        const first_value = try self.parse_expression();
+        try args.append(self.allocator, first_value);
+
+        // parse remaining values
+        while (self.is_current_token(.comma)) {
+            self.advance_token(); // consume comma
+            const value = try self.parse_expression();
+            try args.append(self.allocator, value);
+        }
+
+        const arg_list = try self.allocator.create(Node);
+        arg_list.* = Node{
+            .argument_list = ArgumentList{
+                .args = try args.toOwnedSlice(self.allocator),
+            }
+        };
+
+        return arg_list;
     }
 
-    fn parse_statement(self: *Parser) ParseError!Node {
+    fn parse_statement(self: *Parser) ParseError!*Node {
         const token = self.current_token() orelse {
             return ParseError.UnexpectedEndOfFile;
         };
@@ -1640,42 +1769,42 @@ pub const Parser = struct {
         switch (token.type) {
             .comment => {
                 self.advance_token();
-                return self.parse_comment(token);
+                return try self.parse_comment(token);
             },
 
             .text => {
                 self.advance_token();
-                return self.parse_text(token);
+                return try self.parse_text(token);
             },
 
             .text_css => {
                 self.advance_token();
-                return self.parse_text(token);
+                return try self.parse_text(token);
             },
 
             .text_js => {
                 self.advance_token();
-                return self.parse_text(token);
+                return try self.parse_text(token);
             },
 
             .css_start => {
                 self.advance_token();
-                return self.parse_text(token);
+                return try self.parse_text(token);
             },
 
             .css_end => {
                 self.advance_token();
-                return self.parse_text(token);
+                return try self.parse_text(token);
             },
 
             .js_start => {
                 self.advance_token();
-                return self.parse_text(token);
+                return try self.parse_text(token);
             },
 
             .js_end => {
                 self.advance_token();
-                return self.parse_text(token);
+                return try self.parse_text(token);
             },
 
             .expr_start => {
@@ -1723,17 +1852,18 @@ pub const Parser = struct {
 
     pub fn parse(self: *Parser) ParseError!Node {
         var nodes: std.ArrayList(Node) = .empty;
+        defer nodes.deinit(self.allocator);
 
         while (self.current_token()) |_| {
             const node = try self.parse_statement();
-            try nodes.append(self.allocator, node);
+            try nodes.append(self.allocator, node.*);
         }
 
         return Node{
             .program = Program{
                 .root = Block{
-                    .block = try nodes.toOwnedSlice(self.allocator)
-                }
+                    .block = try nodes.toOwnedSlice(self.allocator),
+                },
             },
         };
     }
@@ -1748,52 +1878,7 @@ pub fn main() void {
 
     const allocator = arena.allocator();
 
-    const input = \\
-        \\ // tags
-        \\ <style>
-        \\   html {
-        \\     color: ${value};
-        \\   }
-        \\ </style>
-        \\ 
-        \\ <script>
-        \\   if (true) {
-        \\     const test = ${value};
-        \\   }
-        \\ </script>
-        \\ 
-        \\ // expressions
-        \\ <div>{2 + 2}</div>
-        \\ <div>{2 + 2 == 4 ? 'yes' : 'no'}</div>
-        \\ <div>{item}</div>
-        \\ <div>{item.id}</div>
-        \\ <div>{item[var].id}</div>
-        \\ 
-        \\ // loop
-        \\ {for item, index in items}
-        \\     <!-- ... -->
-        \\ {/for}
-        \\ 
-        \\ // if block
-        \\ {if condition}
-        \\     <!-- ... -->
-        \\ {else if condition_2}
-        \\     <!-- ... -->
-        \\ {else}
-        \\     <!-- ... -->
-        \\ {/if}
-        \\ 
-        \\ // switch block
-        \\ {switch var}
-        \\   {case 2 + 2}
-        \\     <!-- ... -->
-        \\ 
-        \\   {case 'test_1', 'test_2'}
-        \\     <!-- ... -->
-        \\ 
-        \\   {default}
-        \\     <!-- ... -->
-        \\ {/switch}
+    const input = \\{func(1, 2, 3)}
     ;
 
     var lexer = Lexer.init(input, allocator);
@@ -1803,13 +1888,17 @@ pub fn main() void {
         return;
     };
 
+    for (tokens) |t| {
+        std.debug.print("{any}\n", .{ t.type });
+    }
+
     var parser = Parser.init(tokens, allocator);
 
     _ = parser.parse() catch |err| switch (err) {
         ParseError.OutOfMemory => {
             const t = parser.current_token();
 
-            std.debug.print("OutOfMemory (line {}, col {}) \n", .{ 
+            std.debug.print("OutOfMemory (line {}, col {}) \n", .{
                 t.?.position.line,
                 t.?.position.column
             });
@@ -1820,7 +1909,7 @@ pub fn main() void {
         ParseError.UnknownToken => {
             const t = parser.current_token();
 
-            std.debug.print("Unknown token \"{s}\" [{any}] (line {}, col {}) \n", .{ 
+            std.debug.print("Unknown token \"{s}\" [{any}] (line {}, col {}) \n", .{
                 t.?.value,
                 t.?.type,
                 t.?.position.line,
@@ -1833,7 +1922,7 @@ pub fn main() void {
         ParseError.UnexpectedToken => {
             const t = parser.current_token();
 
-            std.debug.print("Unexpected token \"{s}\" [{any}] (line {}, col {}) \n", .{ 
+            std.debug.print("Unexpected token \"{s}\" [{any}] (line {}, col {}) \n", .{
                 t.?.value,
                 t.?.type,
                 t.?.position.line,
@@ -1846,7 +1935,7 @@ pub fn main() void {
         ParseError.UnexpectedEndOfFile => {
             const t = parser.current_token();
 
-            std.debug.print("Unexpected EOF \"{s}\" [{any}] (line {}, col {}) \n", .{ 
+            std.debug.print("Unexpected EOF \"{s}\" [{any}] (line {}, col {}) \n", .{
                 t.?.value,
                 t.?.type,
                 t.?.position.line,
@@ -1859,7 +1948,7 @@ pub fn main() void {
         ParseError.InvalidSyntax => {
             const t = parser.current_token();
 
-            std.debug.print("Unexpected token: \"{s}\" [{any}] (line {}, col {}) \n", .{ 
+            std.debug.print("Unexpected token: \"{s}\" [{any}] (line {}, col {}) \n", .{
                 t.?.value,
                 t.?.type,
                 t.?.position.line,
