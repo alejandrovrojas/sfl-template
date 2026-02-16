@@ -917,6 +917,15 @@ pub const Lexer = struct {
 
         return try tokens.toOwnedSlice(self.allocator);
     }
+
+    pub fn print_token(_: *Lexer, token: Token) void {
+        std.debug.print("{:>2}:{:<5} {s:<15} {s}\n", .{
+            token.position.line,
+            token.position.column,
+            @tagName(token.type),
+            token.value,
+        });
+    }
 };
 
 pub const NodeType = enum {
@@ -1867,6 +1876,166 @@ pub const Parser = struct {
             },
         };
     }
+
+    pub fn print_node(self: *Parser, node: *const Node, indent: usize) void {
+        const indt = self.allocator.alloc(u8, indent) catch return;
+        const indentation = 4;
+        @memset(indt, ' ');
+
+        switch (node.*) {
+            .program => |n| {
+                std.debug.print("{s}program [{}]\n", .{ indt, n.body.len });
+
+                for (n.body) |child| {
+                    self.print_node(child, indent + indentation);
+                }
+            },
+
+            .text => |n| {
+                std.debug.print("{s}text \"{s}\"\n", .{ indt, n.value });
+            },
+
+            .comment => |n| {
+                std.debug.print("{s}comment \"{s}\"\n", .{ indt, n.value });
+            },
+
+            .block_if => |n| {
+                std.debug.print("{s}if\n", .{ indt });
+                std.debug.print("{s}- condition\n", .{ indt });
+                self.print_node(n.condition, indent + indentation);
+                std.debug.print("{s}- consequent [{}]\n", .{ indt, n.consequent.len });
+
+                for (n.consequent) |child| {
+                    self.print_node(child, indent + indentation);
+                }
+
+                if (n.alternate) |alt| {
+                    std.debug.print("{s}- alternate\n", .{ indt });
+                    self.print_node(alt, indent + indentation);
+                }
+            },
+
+            .block_switch => |n| {
+                std.debug.print("{s}switch\n", .{ indt });
+                std.debug.print("{s}- expression\n", .{ indt });
+                self.print_node(n.expression, indent + indentation);
+                std.debug.print("{s}- cases [{}]\n", .{ indt, n.cases.len });
+
+                for (n.cases) |case| {
+                    self.print_node(case, indent + indentation);
+                }
+            },
+
+            .block_case => |n| {
+                std.debug.print("{s}case\n", .{ indt });
+
+                if (n.values) |values| {
+                    std.debug.print("{s}- values [{}]\n", .{ indt, values.len });
+
+                    for (values) |value| {
+                        self.print_node(value, indent + indentation);
+                    }
+                } else {
+                    std.debug.print("{s}- default\n", .{ indt });
+                }
+
+                std.debug.print("{s}- body [{}]\n", .{ indt, n.body.len });
+
+                for (n.body) |child| {
+                    self.print_node(child, indent + indentation);
+                }
+            },
+
+            .block_for => |n| {
+                std.debug.print("{s}for\n", .{ indt });
+                std.debug.print("{s}- iterator \"{s}\"\n", .{ indt, n.iterator });
+
+                if (n.iterator_index) |idx| {
+                    std.debug.print("{s}- index \"{s}\"\n", .{ indt, idx });
+                }
+
+                std.debug.print("{s}- iterable\n", .{ indt });
+                self.print_node(n.iterable, indent + indentation);
+                std.debug.print("{s}- body [{}]\n", .{ indt, n.body.len });
+
+                for (n.body) |child| {
+                    self.print_node(child, indent + indentation);
+                }
+            },
+
+            .literal_null => |n| {
+                std.debug.print("{s}null {}\n", .{ indt, n.value });
+            },
+
+            .literal_int => |n| {
+                std.debug.print("{s}int {}\n", .{ indt, n.value });
+            },
+
+            .literal_float => |n| {
+                std.debug.print("{s}float {}\n", .{ indt, n.value });
+            },
+
+            .literal_string => |n| {
+                std.debug.print("{s}string \"{s}\"\n", .{ indt, n.value });
+            },
+
+            .literal_boolean => |n| {
+                std.debug.print("{s}boolean {}\n", .{ indt, n.value });
+            },
+
+            .expression => |n| {
+                std.debug.print("{s}expression\n", .{ indt });
+                std.debug.print("{s}- value\n", .{ indt });
+                self.print_node(n.value, indent + indentation);
+            },
+
+            .expression_conditional => |n| {
+                std.debug.print("{s}conditional\n", .{ indt });
+                std.debug.print("{s}- condition\n", .{ indt });
+                self.print_node(n.condition, indent + indentation);
+                std.debug.print("{s}- consequent\n", .{ indt });
+                self.print_node(n.consequent, indent + indentation);
+                std.debug.print("{s}- alternate\n", .{ indt });
+                self.print_node(n.alternate, indent + indentation);
+            },
+
+            .expression_binary => |n| {
+                std.debug.print("{s}binary\n", .{ indt });
+                std.debug.print("{s}- left\n", .{ indt });
+                self.print_node(n.left, indent + indentation);
+                std.debug.print("{s}- operator {s}\n", .{ indt, @tagName(n.operator) });
+                std.debug.print("{s}- right\n", .{ indt });
+                self.print_node(n.right, indent + indentation);
+            },
+
+            .expression_unary => |n| {
+                std.debug.print("{s}unary\n", .{ indt });
+                std.debug.print("{s}- operator {s}\n", .{ indt, @tagName(n.operator) });
+                std.debug.print("{s}- operand\n", .{ indt });
+                self.print_node(n.operand, indent + indentation);
+            },
+
+            .identifier => |n| {
+                std.debug.print("{s}identifier \"{s}\"\n", .{ indt, n.name });
+            },
+
+            .function_call => |n| {
+                std.debug.print("{s}function_call\n", .{ indt });
+                std.debug.print("{s}- identifier\n", .{ indt });
+                self.print_node(n.identifier, indent + indentation);
+                std.debug.print("{s}- args\n", .{ indt });
+                self.print_node(n.args, indent + indentation);
+            },
+
+            .argument_list => |n| {
+                std.debug.print("{s}args [{}]\n", .{ indt, n.args.len });
+
+                for (n.args) |arg| {
+                    self.print_node(arg, indent + indentation);
+                }
+            },
+        }
+    }
 };
 
 pub fn main() void {
@@ -1878,7 +2047,56 @@ pub fn main() void {
 
     const allocator = arena.allocator();
 
-    const input = \\{func(1, 2, 3)}
+    const input = \\
+	    \\// expression
+	    \\<style>
+	    \\    html {
+	    \\        color: @{value};
+	    \\    }
+	    \\</style>
+	    \\
+	    \\// expression
+	    \\<script>
+	    \\    if (true) {
+	    \\        const test = @{value};
+	    \\    }
+	    \\</script>
+	    \\
+	    \\// expressions
+	    \\<div>{true}</div>
+	    \\<div>{2 + 2}</div>
+	    \\<div>{2 + 2 == 4 ? 'yes' : 'no'}</div>
+	    \\<div>{item}</div>
+		\\
+		\\// member access
+	    \\//<div>{item.id}</div>
+	    \\//<div>{item[var].id}</div>
+	    \\
+	    \\// loop
+	    \\{for item, index in items}
+	    \\    <!-- ... -->
+	    \\{/for}
+	    \\
+	    \\// if block
+	    \\{if condition}
+	    \\    <!-- ... -->
+	    \\{else if condition_2}
+	    \\    <!-- ... -->
+	    \\{else}
+	    \\    <!-- ... -->
+	    \\{/if}
+	    \\
+	    \\// switch block
+	    \\{switch var}
+	    \\    {case 2 + 2}
+	    \\        <!-- ... -->
+	    \\
+	    \\    {case 'test_1', 'test_2'}
+	    \\        <!-- ... -->
+	    \\
+	    \\    {default}
+	    \\        <!-- ... -->
+	    \\{/switch}
     ;
 
     var lexer = Lexer.init(input, allocator);
@@ -1888,13 +2106,9 @@ pub fn main() void {
         return;
     };
 
-    for (tokens) |t| {
-        std.debug.print("{any}\n", .{ t.type });
-    }
-
     var parser = Parser.init(tokens, allocator);
 
-    _ = parser.parse() catch |err| switch (err) {
+    const ast = parser.parse() catch |err| switch (err) {
         ParseError.OutOfMemory => {
             const t = parser.current_token();
 
@@ -1958,4 +2172,10 @@ pub fn main() void {
             return;
         }
     };
+
+    for (tokens) |t| {
+        lexer.print_token(t);
+    }
+
+    parser.print_node(&ast, 0);
 }
