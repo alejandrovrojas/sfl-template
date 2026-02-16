@@ -930,7 +930,6 @@ pub const Lexer = struct {
 
 pub const NodeType = enum {
     program,
-    block,
     text,
     comment,
     block_if,
@@ -953,7 +952,6 @@ pub const NodeType = enum {
 
 pub const Node = union(NodeType) {
     program:                Program,
-    block:                  Block,
     text:                   Text,
     comment:                Comment,
     block_if:               If,
@@ -975,11 +973,7 @@ pub const Node = union(NodeType) {
 };
 
 pub const Program = struct {
-    root: Block,
-};
-
-pub const Block = struct {
-    block: []Node,
+    body: []*Node,
 };
 
 pub const Comment = struct {
@@ -992,7 +986,7 @@ pub const Text = struct {
 
 pub const FunctionCall = struct {
     identifier: *Node,
-    args: *Node,
+    args:       *Node,
 };
 
 pub const ArgumentList = struct {
@@ -1001,30 +995,30 @@ pub const ArgumentList = struct {
 
 // @todo -- could be nested instead of a flat list?
 pub const MemberAccess = struct {
-    members: []Node,
+    members: []*Node,
 };
 
 pub const If = struct {
-    condition: *Node,
-    consequent: Block,
-    alternate: ?*Node,
+    condition:  *Node,
+    consequent: []*Node,
+    alternate:  ?*Node,
 };
 
 pub const Switch = struct {
     expression: *Node,
-    cases: []Node,
+    cases:      []*Node,
 };
 
 pub const Case = struct {
-    values: *Node,
-    body: Block,
+    values: ?[]*Node,
+    body:   []*Node,
 };
 
 pub const For = struct {
-    iterator: []const u8,
+    iterator:       []const u8,
     iterator_index: ?[]const u8,
-    iterable: *Node,
-    body: Block,
+    iterable:       *Node,
+    body:           []*Node,
 };
 
 pub const Expression = struct {
@@ -1032,20 +1026,20 @@ pub const Expression = struct {
 };
 
 pub const ExpressionConditional = struct {
-    condition: *Node,
+    condition:  *Node,
     consequent: *Node,
-    alternate: *Node,
+    alternate:  *Node,
 };
 
 pub const ExpressionBinary = struct {
-    left: *Node,
+    left:     *Node,
     operator: TokenType,
-    right: *Node,
+    right:    *Node,
 };
 
 pub const ExpressionUnary = struct {
     operator: TokenType,
-    operand: *Node,
+    operand:  *Node,
 };
 
 pub const Identifier = struct {
@@ -1069,7 +1063,7 @@ pub const LiteralBoolean = struct {
 };
 
 pub const LiteralNull = struct {
-    value: i8
+    value: i8 // @note -- literally null?
 };
 
 pub const Parser = struct {
@@ -1141,8 +1135,8 @@ pub const Parser = struct {
         return false;
     }
 
-    fn parse_until(self: *Parser, end_tokens: []const TokenType) ParseError![]Node {
-        var nodes: std.ArrayList(Node) = .empty;
+    fn parse_until(self: *Parser, end_tokens: []const TokenType) ParseError![]*Node {
+        var nodes: std.ArrayList(*Node) = .empty;
         defer nodes.deinit(self.allocator);
 
         while (self.current_token()) |_| {
@@ -1157,7 +1151,7 @@ pub const Parser = struct {
             }
 
             const node = try self.parse_statement();
-            try nodes.append(self.allocator, node.*);
+            try nodes.append(self.allocator, node);
         }
 
         return try nodes.toOwnedSlice(self.allocator);
@@ -1199,9 +1193,7 @@ pub const Parser = struct {
             .if_end
         };
 
-        const consequent = Block{
-            .block = try self.parse_until(&end_tokens)
-        };
+        const consequent = try self.parse_until(&end_tokens);
 
         var alternate: ?*Node = null;
 
@@ -1254,8 +1246,8 @@ pub const Parser = struct {
 
         const node = try self.allocator.create(Node);
         node.* = Node{
-            .block = Block{
-                .block = body_nodes,
+            .program = Program{
+                .body = body_nodes,
             },
         };
         return node;
@@ -1268,7 +1260,7 @@ pub const Parser = struct {
 
         try self.expect_token(.expr_end);
 
-        var case_nodes: std.ArrayList(Node) = .empty;
+        var case_nodes: std.ArrayList(*Node) = .empty;
         defer case_nodes.deinit(self.allocator);
 
         while (self.current_token()) |_| {
@@ -1284,10 +1276,10 @@ pub const Parser = struct {
 
                 if (next_token.type == .case_start) {
                     self.advance_token();
-                    try case_nodes.append(self.allocator, (try self.parse_case_block()).*);
+                    try case_nodes.append(self.allocator, try self.parse_case_block());
                 } else if (next_token.type == .default_start) {
                     self.advance_token();
-                    try case_nodes.append(self.allocator, (try self.parse_default_block()).*);
+                    try case_nodes.append(self.allocator, try self.parse_default_block());
                 } else {
                     self.advance_token();
                     return ParseError.UnexpectedToken;
@@ -1323,10 +1315,8 @@ pub const Parser = struct {
         const case_node = try self.allocator.create(Node);
         case_node.* = Node{
             .block_case = Case{
-                .values = case_values,
-                .body = Block{
-                    .block = body_nodes
-                },
+                .values = case_values.argument_list.args,
+                .body = body_nodes,
             },
         };
         return case_node;
@@ -1340,20 +1330,11 @@ pub const Parser = struct {
             .switch_end
         });
 
-        const empty_values = try self.allocator.create(Node);
-        empty_values.* = Node{
-            .argument_list = ArgumentList{
-                .args = &[_]*Node{},
-            }
-        };
-
         const default_node = try self.allocator.create(Node);
         default_node.* = Node{
             .block_case = Case{
-                .values = empty_values,
-                .body = Block{
-                    .block = body_nodes,
-                },
+                .values = null,
+                .body = body_nodes,
             },
         };
         return default_node;
@@ -1408,7 +1389,7 @@ pub const Parser = struct {
                 .iterator = iterator,
                 .iterator_index = iterator_index,
                 .iterable = iterable,
-                .body = Block{ .block = body_nodes },
+                .body = body_nodes,
             },
         };
         return node;
@@ -1738,7 +1719,7 @@ pub const Parser = struct {
         var args: std.ArrayList(*Node) = .empty;
         defer args.deinit(self.allocator);
 
-        // handle empty case values (shouldn't happen but defensive)
+        // @note -- too defensive? handle empty case values
         if (self.is_current_token(.expr_end)) {
             const arg_list = try self.allocator.create(Node);
             arg_list.* = Node{
@@ -1749,13 +1730,11 @@ pub const Parser = struct {
             return arg_list;
         }
 
-        // parse first value
         const first_value = try self.parse_expression();
         try args.append(self.allocator, first_value);
 
-        // parse remaining values
         while (self.is_current_token(.comma)) {
-            self.advance_token(); // consume comma
+            self.advance_token();
             const value = try self.parse_expression();
             try args.append(self.allocator, value);
         }
@@ -1860,19 +1839,17 @@ pub const Parser = struct {
     }
 
     pub fn parse(self: *Parser) ParseError!Node {
-        var nodes: std.ArrayList(Node) = .empty;
+        var nodes: std.ArrayList(*Node) = .empty;
         defer nodes.deinit(self.allocator);
 
         while (self.current_token()) |_| {
             const node = try self.parse_statement();
-            try nodes.append(self.allocator, node.*);
+            try nodes.append(self.allocator, node);
         }
 
         return Node{
             .program = Program{
-                .root = Block{
-                    .block = try nodes.toOwnedSlice(self.allocator),
-                },
+                .body = try nodes.toOwnedSlice(self.allocator),
             },
         };
     }
