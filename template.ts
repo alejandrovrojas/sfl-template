@@ -27,7 +27,13 @@ enum TokenType {
 	switch_end             = "switch_end",
 	case_start             = "case_start",
 	default_start          = "default_start",
-	import_start           = "import_start",
+	insert_start           = "insert_start",
+	use_start              = "use_start",
+	use_end                = "use_end",
+	slot_start             = "slot_start",
+	slot_end               = "slot_end",
+	into_start             = "into_start",
+	into_end               = "into_end",
 	plus                   = "plus",
 	minus                  = "minus",
 	multiplication         = "multiplication",
@@ -68,7 +74,10 @@ enum NodeType {
 	block_case             = "block_case",
 	block_default          = "block_default",
 	block_for              = "block_for",
-	import                 = "import",
+	block_slot             = "block_slot",
+	block_use              = "block_use",
+	block_into             = "block_into",
+	insert                 = "insert",
 	literal_null           = "literal_null",
 	literal_int            = "literal_int",
 	literal_float          = "literal_float",
@@ -101,7 +110,10 @@ type Node =
 	| Case
 	| Default
 	| For
-	| Import
+	| Insert
+	| Use
+	| Slot
+	| Into
 	| LiteralNull
 	| LiteralInt
 	| LiteralFloat
@@ -189,9 +201,29 @@ type For = BaseNode & {
 	body:       Node[];
 }
 
-type Import = BaseNode & {
-	type:       NodeType.import;
-	value:      string;
+type Insert = BaseNode & {
+	type:       NodeType.insert;
+	template:   string;
+	values:     KeyValue[]
+}
+
+type Use = BaseNode & {
+	type:       NodeType.block_use;
+	template:   string;
+	values:     KeyValue[]
+	into:       Node[];
+}
+
+type Slot = BaseNode & {
+	type:       NodeType.block_slot;
+	name:       string | null;
+	body:       Node[];
+}
+
+type Into = BaseNode & {
+	type:       NodeType.block_into;
+	name:       string | null;
+	body:       Node[];
 }
 
 type Expression = BaseNode & {
@@ -573,6 +605,53 @@ export class Lexer {
 					}
 
 					case '/': {
+						// {/use}
+						if (
+							this.cursor + 4 <= this.input.length &&
+							this.input[this.cursor + 1] === 'u' &&
+							this.input[this.cursor + 2] === 's' &&
+							this.input[this.cursor + 3] === 'e'
+						) {
+							for (let i = 0; i < 4; i++) {
+								this.advance_ch();
+							}
+
+							this.type = TokenType.use_end;
+							return this.create_token(start_cursor, start_position);
+						}
+
+						// {/slot}
+						if (
+							this.cursor + 5 <= this.input.length &&
+							this.input[this.cursor + 1] === 's' &&
+							this.input[this.cursor + 2] === 'l' &&
+							this.input[this.cursor + 3] === 'o' &&
+							this.input[this.cursor + 4] === 't'
+						) {
+							for (let i = 0; i < 5; i++) {
+								this.advance_ch();
+							}
+
+							this.type = TokenType.slot_end;
+							return this.create_token(start_cursor, start_position);
+						}
+
+						// {/into}
+						if (
+							this.cursor + 5 <= this.input.length &&
+							this.input[this.cursor + 1] === 'i' &&
+							this.input[this.cursor + 2] === 'n' &&
+							this.input[this.cursor + 3] === 't' &&
+							this.input[this.cursor + 4] === 'o'
+						) {
+							for (let i = 0; i < 5; i++) {
+								this.advance_ch();
+							}
+
+							this.type = TokenType.into_end;
+							return this.create_token(start_cursor, start_position);
+						}
+
 						// {/for}
 						if (
 							this.cursor + 4 <= this.input.length &&
@@ -847,6 +926,56 @@ export class Lexer {
 							return this.create_token(start_cursor, start_position);
 						}
 
+						// use
+						if (
+							this.cursor + 4 <= this.input.length &&
+							this.input[this.cursor]     === 'u' &&
+							this.input[this.cursor + 1] === 's' &&
+							this.input[this.cursor + 2] === 'e' &&
+							this.is_keyword_boundary(this.input[this.cursor + 3])
+						) {
+							for (let i = 0; i < 4; i++) {
+								this.advance_ch();
+							}
+
+							this.type = TokenType.use_start;
+							return this.create_token(start_cursor, start_position);
+						}
+
+						// slot
+						if (
+							this.cursor + 5 <= this.input.length &&
+							this.input[this.cursor]     === 's' &&
+							this.input[this.cursor + 1] === 'l' &&
+							this.input[this.cursor + 2] === 'o' &&
+							this.input[this.cursor + 3] === 't' &&
+							this.is_keyword_boundary(this.input[this.cursor + 4])
+						) {
+							for (let i = 0; i < 4; i++) {
+								this.advance_ch();
+							}
+
+							this.type = TokenType.slot_start;
+							return this.create_token(start_cursor, start_position);
+						}
+
+						// into
+						if (
+							this.cursor + 5 <= this.input.length &&
+							this.input[this.cursor]     === 'i' &&
+							this.input[this.cursor + 1] === 'n' &&
+							this.input[this.cursor + 2] === 't' &&
+							this.input[this.cursor + 3] === 'o' &&
+							this.is_keyword_boundary(this.input[this.cursor + 4])
+						) {
+							for (let i = 0; i < 4; i++) {
+								this.advance_ch();
+							}
+
+							this.type = TokenType.into_start;
+							return this.create_token(start_cursor, start_position);
+						}
+
 						// for
 						if (
 							this.cursor + 4 <= this.input.length &&
@@ -966,13 +1095,13 @@ export class Lexer {
 							return this.create_token(start_cursor, start_position);
 						}
 
-						// import
+						// insert
 						if (
 							this.cursor + 8 <= this.input.length &&
 							this.input[this.cursor] === 'i' &&
-							this.input[this.cursor + 1] === 'm' &&
-							this.input[this.cursor + 2] === 'p' &&
-							this.input[this.cursor + 3] === 'o' &&
+							this.input[this.cursor + 1] === 'n' &&
+							this.input[this.cursor + 2] === 's' &&
+							this.input[this.cursor + 3] === 'e' &&
 							this.input[this.cursor + 4] === 'r' &&
 							this.input[this.cursor + 5] === 't' &&
 							this.is_keyword_boundary(this.input[this.cursor + 6])
@@ -981,7 +1110,7 @@ export class Lexer {
 								this.advance_ch();
 							}
 
-							this.type = TokenType.import_start;
+							this.type = TokenType.insert_start;
 							return this.create_token(start_cursor, start_position);
 						}
 
@@ -1331,6 +1460,136 @@ export class Parser {
 		};
 	}
 
+	private parse_insert_block(): Node {
+		this.advance_token();
+
+		const template = this.expect_token(TokenType.string);
+
+		let values: KeyValue[] = [];
+
+		if (this.current_token().type == TokenType.l_paren) {
+			this.advance_token();
+			values = this.parse_key_value_list();
+			this.expect_token(TokenType.r_paren);
+		}
+
+		this.expect_token(TokenType.expr_end);
+
+		return {
+			type: NodeType.insert,
+			template: template.value,
+			values: values
+		}
+	}
+
+	private parse_use_block(): Node {
+		this.advance_token();
+
+		const template = this.expect_token(TokenType.string);
+
+		let values: KeyValue[] = [];
+
+		if (this.current_token().type == TokenType.l_paren) {
+			this.advance_token();
+			values = this.parse_key_value_list();
+			this.expect_token(TokenType.r_paren);
+		}
+
+		this.expect_token(TokenType.expr_end);
+
+		const into_default: Into = {
+			type: NodeType.block_into,
+			name: null,
+			body: this.parse_until([
+				TokenType.into_start,
+				TokenType.use_end,
+			])
+		};
+
+		const into_nodes: Node[] = [];
+
+		if (into_default.body.length > 0) {
+			into_nodes.push(into_default);
+		}
+
+		this.expect_token(TokenType.expr_start);
+
+		const current = this.current_token();
+
+		if (current.type === TokenType.use_end) {
+			this.expect_token(TokenType.use_end);
+			this.expect_token(TokenType.expr_end);
+		} else {
+			while (true) {
+				if (current.type === TokenType.into_start) {
+					into_nodes.push(this.parse_into_block());
+					break;
+				}
+			}
+
+			this.expect_token(TokenType.expr_start);
+			this.expect_token(TokenType.use_end);
+			this.expect_token(TokenType.expr_end);
+		}
+
+		if (into_nodes.length === 0) {
+			// empty {use} block -- console.warn?
+		}
+
+		return {
+			type:     NodeType.block_use,
+			template: template.value,
+			values:   values,
+			into:     into_nodes
+		}
+	}
+
+	private parse_slot_block(): Node {
+		this.advance_token();
+
+		let name: Token | null = null;
+
+		if (this.current_token().type == TokenType.string) {
+			name = this.advance_token();
+		}
+
+		this.expect_token(TokenType.expr_end);
+
+		const body = this.parse_until([TokenType.slot_end]);
+
+		this.expect_token(TokenType.expr_start);
+		this.expect_token(TokenType.slot_end);
+		this.expect_token(TokenType.expr_end);
+
+		return {
+			type:     NodeType.block_slot,
+			name:     name?.value || null,
+			body:     body
+		}
+	}
+
+	private parse_into_block(): Node {
+		this.advance_token();
+
+		const name = this.expect_token(TokenType.string);
+
+		this.expect_token(TokenType.expr_end);
+
+		const body = this.parse_until([
+			TokenType.into_end
+		]);
+
+		this.expect_token(TokenType.expr_start);
+		this.expect_token(TokenType.into_end);
+		this.expect_token(TokenType.expr_end);
+
+		return {
+			type:     NodeType.block_into,
+			name:     name.value,
+			body:     body
+		}
+	}
+
 	private parse_for_block(): Node {
 		this.expect_token(TokenType.for_start);
 
@@ -1602,17 +1861,31 @@ export class Parser {
 		return left;
 	}
 
-	private parse_import_block(): Node {
-		this.advance_token();
+	private parse_key_value_list(): KeyValue[] {
+		const pairs: KeyValue[] = [];
 
-		const path = this.expect_token(TokenType.string);
+		while (true) {
+			const key = this.expect_token(TokenType.identifier);
 
-		this.expect_token(TokenType.expr_end);
+			this.expect_token(TokenType.colon);
 
-		return {
-			type: NodeType.import,
-			value: path.value
-		}
+			const value = this.parse_expression();
+
+			pairs.push({
+				key: key.value,
+				value: value
+			});
+
+			if (this.is_current_token(TokenType.comma)) {
+				this.advance_token();
+			}
+
+			if (this.is_current_token(TokenType.r_paren)) {
+				break;
+			}
+		};
+
+		return pairs;
 	}
 
 	private parse_primary(): Node {
@@ -1645,7 +1918,9 @@ export class Parser {
 			}
 
 			case TokenType.identifier:
-			case TokenType.import_start:
+			case TokenType.insert_start:
+			case TokenType.use_start:
+			case TokenType.slot_start:
 			case TokenType.for_start:
 			case TokenType.for_in:
 			case TokenType.if_start:
@@ -1747,9 +2022,28 @@ export class Parser {
 							return this.parse_import_block();
 						}
 
-						default: {
-							return this.parse_expression_block();
-						}
+					case TokenType.use_start: {
+						return this.parse_use_block();
+					}
+
+					case TokenType.slot_start: {
+						return this.parse_slot_block();
+					}
+
+					case TokenType.into_start: {
+						return this.parse_into_block();
+					}
+
+					case TokenType.eof: {
+						throw {
+							message: `Unexpected end of file`,
+							line:    current.position.line,
+							column:  current.position.column
+						} as TemplateError;
+					}
+
+					default: {
+						return this.parse_expression_block();
 					}
 				} else {
 					throw new Error(ParseError.UnexpectedEndOfFile);
