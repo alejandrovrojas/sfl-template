@@ -1,5 +1,4 @@
 enum ParseError {
-	InvalidSyntax          = "InvalidSyntax",
 	UnknownToken           = "UnknownToken",
 	UnexpectedToken        = "UnexpectedToken",
 	UnexpectedEndOfFile    = "UnexpectedEndOfFile"
@@ -54,7 +53,7 @@ enum TokenType {
 	comma                  = "comma",
 	period                 = "period",
 	colon                  = "colon",
-	exclamation            = "exclamation",
+	exclamation_mark       = "exclamation_mark",
 	question_mark          = "question_mark",
 	boolean                = "boolean",
 	string                 = "string",
@@ -66,10 +65,11 @@ enum TokenType {
 }
 
 enum NodeType {
-	program                = "program",
+	template               = "template",
 	text                   = "text",
 	comment                = "comment",
 	block_if               = "block_if",
+	block_else             = "block_else",
 	block_switch           = "block_switch",
 	block_case             = "block_case",
 	block_default          = "block_default",
@@ -106,6 +106,7 @@ type Node =
 	| PlainText
 	| TextComment
 	| If
+	| Else
 	| Switch
 	| Case
 	| Default
@@ -126,7 +127,13 @@ type Node =
 	| ExpressionMember
 	| Identifier
 	| FunctionCall
-	| ArgumentList;
+
+
+type TemplateError = {
+	message:    string;
+	line:       number;
+	column:     number;
+}
 
 type Token = {
 	type:       TokenType;
@@ -144,8 +151,9 @@ type BaseNode = {
 }
 
 type Template = BaseNode & {
-	type:       NodeType.program;
+	type:       NodeType.template;
 	body:       Node[];
+	imports:    string[]
 }
 
 type TextComment = BaseNode & {
@@ -161,12 +169,12 @@ type PlainText = BaseNode & {
 type FunctionCall = BaseNode & {
 	type:       NodeType.function_call;
 	identifier: Node;
-	args:       Node;
+	args:       Node[];
 }
 
-type ArgumentList = BaseNode & {
-	type:       NodeType.argument_list;
-	args:       Node[];
+type KeyValue = {
+	key:        string;
+	value:      Node
 }
 
 type If = BaseNode & {
@@ -174,6 +182,11 @@ type If = BaseNode & {
 	condition:  Node;
 	consequent: Node[];
 	alternate:  Node | null;
+}
+
+type Else = BaseNode & {
+	type:       NodeType.block_else;
+	body:       Node[];
 }
 
 type Switch = BaseNode & {
@@ -184,7 +197,7 @@ type Switch = BaseNode & {
 
 type Case = BaseNode & {
 	type:       NodeType.block_case;
-	values:     Node;
+	values:     Node[];
 	body:       Node[];
 }
 
@@ -287,7 +300,7 @@ type LiteralNull = BaseNode & {
 	value:      null;
 }
 
-export class Lexer {
+class Lexer {
 	input:     string;
 	cursor:    number;
 	line:      number;
@@ -748,7 +761,7 @@ export class Lexer {
 						}
 
 						this.advance_ch();
-						this.type = TokenType.exclamation;
+						this.type = TokenType.exclamation_mark;
 
 						return this.create_token(start_cursor, start_position);
 					}
@@ -894,7 +907,7 @@ export class Lexer {
 						// true
 						if (
 							this.cursor + 5 <= this.input.length &&
-							this.input[this.cursor] === 't' &&
+							this.input[this.cursor]     === 't' &&
 							this.input[this.cursor + 1] === 'r' &&
 							this.input[this.cursor + 2] === 'u' &&
 							this.input[this.cursor + 3] === 'e' &&
@@ -911,7 +924,7 @@ export class Lexer {
 						// false
 						if (
 							this.cursor + 6 <= this.input.length &&
-							this.input[this.cursor] === 'f' &&
+							this.input[this.cursor]     === 'f' &&
 							this.input[this.cursor + 1] === 'a' &&
 							this.input[this.cursor + 2] === 'l' &&
 							this.input[this.cursor + 3] === 's' &&
@@ -1022,7 +1035,7 @@ export class Lexer {
 							return this.create_token(start_cursor, start_position);
 						}
 
-						// {else}
+						// else
 						if (
 							this.cursor + 5 <= this.input.length &&
 							this.input[this.cursor] === 'e' &&
@@ -1118,9 +1131,11 @@ export class Lexer {
 						if (this.is_alpha(ch)) {
 							while (true) {
 								const c = this.current_ch();
+
 								if (!c || !this.is_alphanumeric(c)) {
 									break;
 								}
+
 								this.advance_ch();
 							}
 
@@ -1227,7 +1242,7 @@ export class Lexer {
 	}
 }
 
-export class Parser {
+class Parser {
 	tokens: Token[];
 	cursor: number;
 
@@ -1379,7 +1394,7 @@ export class Parser {
 		const body_nodes = this.parse_until([TokenType.if_end]);
 
 		return {
-			type: NodeType.program,
+			type: NodeType.block_else,
 			body: body_nodes,
 		};
 	}
@@ -1737,7 +1752,7 @@ export class Parser {
 	private parse_unary(): Node {
 		const token = this.current_token();
 
-		if (token.type === TokenType.minus || token.type === TokenType.exclamation) {
+		if (token.type === TokenType.minus || token.type === TokenType.exclamation_mark) {
 			const operator = token.type;
 
 			this.advance_token();
@@ -1889,9 +1904,9 @@ export class Parser {
 	}
 
 	private parse_primary(): Node {
-		const token = this.current_token();
+		const current = this.current_token();
 
-		switch (token.type) {
+		switch (current.type) {
 			case TokenType.l_paren: {
 				return this.parse_parenthesis();
 			}
@@ -1936,14 +1951,11 @@ export class Parser {
 		}
 	}
 
-	private parse_argument_list(end_token_type: TokenType, allow_empty = true): Node {
+	private parse_argument_list(end_token_type: TokenType, allow_empty = true): Node[] {
 		const argument_list: Node[] = [];
 
 		if (allow_empty && this.current_token().type === end_token_type) {
-			return {
-				type: NodeType.argument_list,
-				args: argument_list,
-			};
+			return argument_list;
 		}
 
 		const first_arg = this.parse_expression();
@@ -1955,14 +1967,13 @@ export class Parser {
 			argument_list.push(value);
 		}
 
-		return {
-			type: NodeType.argument_list,
-			args: argument_list,
-		};
+		return argument_list;
 	}
 
 	private parse_statement(): Node {
-		switch (this.current_token().type) {
+		const current = this.current_token();
+
+		switch (current.type) {
 			case TokenType.comment: {
 				return this.parse_comment();
 			}
@@ -1996,31 +2007,30 @@ export class Parser {
 			}
 
 			case TokenType.expr_start: {
-				const next = this.peek_token();
+				const next = this.peek_token()!;
 
 				this.advance_token();
 
-				if (next) {
-					switch (next.type) {
-						case TokenType.if_start: {
-							return this.parse_if_block();
-						}
+				switch (next.type) {
+					case TokenType.if_start: {
+						return this.parse_if_block();
+					}
 
-						case TokenType.else_start: {
-							return this.parse_else_block();
-						}
+					case TokenType.else_start: {
+						return this.parse_else_block();
+					}
 
-						case TokenType.switch_start: {
-							return this.parse_switch_block();
-						}
+					case TokenType.switch_start: {
+						return this.parse_switch_block();
+					}
 
-						case TokenType.for_start: {
-							return this.parse_for_block();
-						}
+					case TokenType.for_start: {
+						return this.parse_for_block();
+					}
 
-						case TokenType.import_start: {
-							return this.parse_import_block();
-						}
+					case TokenType.insert_start: {
+						return this.parse_insert_block();
+					}
 
 					case TokenType.use_start: {
 						return this.parse_use_block();
