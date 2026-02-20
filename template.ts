@@ -2102,16 +2102,23 @@ class Parser {
 	}
 
 	parse(): Node {
-		const nodes: Node[] = [];
+		const body: Node[] = [];
+		const imports: string[] = [];
 
 		while (!this.is_current_token(TokenType.eof)) {
 			const node = this.parse_statement();
-			nodes.push(node);
+
+			if (node.type === 'insert') {
+				imports.push(node.template);
+			}
+
+			body.push(node);
 		}
 
 		return {
-			type: NodeType.program,
-			body: nodes,
+			type: NodeType.template,
+			imports: imports,
+			body: body,
 		};
 	}
 
@@ -2120,31 +2127,156 @@ class Parser {
 	}
 }
 
-export function debug(input: string): void {
-	const lexer = new Lexer(input);
-	const tokens = lexer.tokenize();
+export class TemplateEngine {
+	private templates: Record<string, any> = {};
+	private imports: Record<string, string[]> = {};
 
-	const parser = new Parser(tokens);
+	compile(template_name: string, content: string): Template {
+		try {
+			const lexer    = new Lexer(content);
+			const tokens   = lexer.tokenize();
+			const parser   = new Parser(tokens);
+			const template = parser.parse() as Template;
 
-	for (const token of tokens) {
-		lexer.print_token(token);
+			this.templates[template_name] = template.body;
+			this.imports[template_name] = template.imports;
+
+			if (this.check_import_cycles()) {
+				 // @todo -- remove line/column or throw earlier?
+				throw {
+					message: `Import cycle in template "${template_name}"`,
+					line:    -1,
+					column:  -1
+				} as TemplateError;
+			}
+
+			return template;
+		} catch({ message, line, column}: any) {
+			throw new Error(`sfl-template: ${message} (${line}:${column})`);
+		}
 	}
 
-	const ast = parser.parse();
+	debug(template_name: string, content: string): Template {
+		try {
+			const lexer    = new Lexer(content);
+			const tokens   = lexer.tokenize();
 
-	parser.print_node(ast);
-}
+			for (const token of tokens) {
+				lexer.print_token(token);
+			}
 
-export function compile(input: string): Template {
-	const lexer = new Lexer(input);
-	const parser = new Parser(lexer.tokenize());
-	return parser.parse() as Template;
+			const parser   = new Parser(tokens);
+			const template = parser.parse() as Template;
+
+			this.templates[template_name] = template.body;
+			this.imports[template_name] = template.imports;
+
+			if (this.check_import_cycles()) {
+				 // @todo -- remove line/column
+				throw {
+					message: `Import cycle in template "${template_name}"`,
+					line:    -1,
+					column:  -1
+				} as TemplateError;
+			}
+
+			parser.print_node(ast);
+
+			return template;
+		} catch({ message, line, column}: any) {
+			throw new Error(`sfl-template: ${message} (${line}:${column})`);
+		}
+	}
+
+	get(name: string): Template | undefined {
+		return this.templates.get(name);
+	}
+
+	// consider moving inside parser to throw early?
+	check_import_cycles() {
+		const degrees: Record<string, number> = {};
+
+		for (const node in this.imports) {
+			if (!(node in degrees)) {
+				degrees[node] = 0;
+			}
+
+			for (const dep of this.imports[node]) {
+				if (!(dep in degrees)) {
+					degrees[dep] = 0;
+				}
+
+				degrees[dep] += 1;
+			}
+		}
+
+		const queue: string[] = [];
+
+		for (const node in degrees) {
+			if (degrees[node] === 0) {
+				queue.push(node);
+			}
+		}
+
+		const result: string[] = [];
+
+		while (queue.length > 0) {
+			const node = queue.shift()!;
+
+			result.push(node);
+
+			if (this.imports[node]) {
+				for (const dep of this.imports[node]) {
+					degrees[dep] -= 1;
+
+					if (degrees[dep] === 0) {
+						queue.push(dep);
+					}
+				}
+			}
+		}
+
+		return result.length < Object.keys(degrees).length;
+	}
 }
 
 try {
-	console.time('e')
-	const ast = compile(`
-		{import "thing.html"}
+	const t = new TemplateEngine();
+
+	t.debug('a.html', `
+		{insert "b.html" (date: "now", other: 2 > 2)}
+		{insert "other.html" (date: "now", other: 2 > 2)}
+	`);
+
+	t.debug("b.html", `
+		{insert "template.html" (date: "now", other: 2 > 2)}
+		{insert "template.html" (date: "then", other: 2 < 2)}
+
+		{use "button" (date: "other")}
+			<div>{date}</div>
+
+			{into "title"}
+				<span>new title</span>
+			{/into}
+		{/use}
+
+
+		{use "button"}
+			<div>{date}</div>
+		{/use}
+
+		// slots
+		<div>
+			{slot "title"}
+				<div>def</div>
+			{/slot}
+
+			<button>
+				{slot}
+					// default slot
+				{/slot}
+			</button>
+		</div>
 
 		// expressions
 		<div>{2 + 2}</div>
@@ -2203,9 +2335,6 @@ try {
 			}
 		</script>
 	`);
-
-	console.log(ast);
-	console.timeEnd('e')
 } catch(error: any) {
 	console.error(error.message);
 }
