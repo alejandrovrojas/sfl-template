@@ -1204,8 +1204,11 @@ class Lexer {
 							return this.create_token(start_cursor, start_position);
 						}
 
-						// invalid lexeme?
-						break;
+						throw {
+							message: `Misplaced character "${ch}"`,
+							line:    start_position.line,
+							column:  start_position.column
+						} as TemplateError;
 					}
 				}
 			}
@@ -1278,8 +1281,20 @@ class Parser {
 	private expect_token(expected_type: TokenType): Token {
 		const current_token = this.current_token();
 
+		if (current_token.type === TokenType.eof) {
+			throw {
+				message: `Unexpected end of file`,
+				line:    current_token.position.line,
+				column:  current_token.position.column
+			} as TemplateError;
+		}
+
 		if (current_token.type !== expected_type) {
-			throw new SyntaxError(`${ParseError.UnexpectedToken} "${current_token.value}" (${current_token.position.line}:${current_token.position.column})`);
+			throw {
+				message: `Unexpected token '${current_token.value}'`,
+				line:    current_token.position.line,
+				column:  current_token.position.column
+			} as TemplateError;
 		}
 
 		this.cursor += 1;
@@ -1431,6 +1446,12 @@ class Parser {
 					this.expect_token(TokenType.expr_end);
 					break;
 				}
+			} else if (current.type === TokenType.eof) {
+				throw {
+					message: `Unexpected end of file`,
+					line:    current.position.line,
+					column:  current.position.column
+				} as TemplateError;
 			} else {
 				this.advance_token();
 			}
@@ -1946,7 +1967,11 @@ class Parser {
 			}
 
 			default: {
-				throw new SyntaxError(`${ParseError.UnexpectedToken} ${token.value} (${token.position.line}:${token.position.column})`);
+				throw {
+					message: `Unexpected token. Invalid syntax using "${current.value}"`,
+					line:    current.position.line,
+					column:  current.position.column
+				} as TemplateError;
 			}
 		}
 	}
@@ -2055,14 +2080,23 @@ class Parser {
 					default: {
 						return this.parse_expression_block();
 					}
-				} else {
-					throw new Error(ParseError.UnexpectedEndOfFile);
 				}
 			}
 
+			case TokenType.eof: {
+				throw {
+					message: `Unexpected end of file`,
+					line:    current.position.line,
+					column:  current.position.column
+				} as TemplateError;
+			}
+
 			default: {
-				console.log(this.current_token());
-				throw new Error(ParseError.UnknownToken);
+				throw {
+					message: `Unknown token`,
+					line:    current.position.line,
+					column:  current.position.column
+				} as TemplateError;
 			}
 		}
 	}
