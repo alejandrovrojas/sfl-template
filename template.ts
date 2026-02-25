@@ -101,10 +101,20 @@ enum LexerMode {
 	expr                   = "expr"
 }
 
-type Node =
-	| Template
-	| PlainText
-	| TextComment
+type ExpressionNode =
+	| ExpressionBinary
+	| ExpressionConditional
+	| ExpressionMember
+	| ExpressionUnary
+	| FunctionCall
+	| Identifier
+	| LiteralBoolean
+	| LiteralFloat
+	| LiteralInt
+	| LiteralNull
+	| LiteralString
+
+type StatementNode =
 	| If
 	| Else
 	| Switch
@@ -114,20 +124,18 @@ type Node =
 	| Insert
 	| Use
 	| Slot
-	| Into
-	| LiteralNull
-	| LiteralInt
-	| LiteralFloat
-	| LiteralString
-	| LiteralBoolean
-	| Expression
-	| ExpressionConditional
-	| ExpressionBinary
-	| ExpressionUnary
-	| ExpressionMember
-	| Identifier
-	| FunctionCall
+	| Into;
 
+type ContentNode =
+	| Expression
+	| PlainText
+	| PlainComment
+
+type Node =
+	| Template
+	| ExpressionNode
+	| StatementNode
+	| ContentNode;
 
 type TemplateError = {
 	message:    string;
@@ -156,7 +164,7 @@ type Template = BaseNode & {
 	imports:    string[]
 }
 
-type TextComment = BaseNode & {
+type PlainComment = BaseNode & {
 	type:       NodeType.comment;
 	value:      string;
 }
@@ -168,20 +176,20 @@ type PlainText = BaseNode & {
 
 type FunctionCall = BaseNode & {
 	type:       NodeType.function_call;
-	identifier: Node;
-	args:       Node[];
+	identifier: Identifier;
+	args:       ExpressionNode[];
 }
 
 type KeyValue = {
 	key:        string;
-	value:      Node
+	value:      ExpressionNode;
 }
 
 type If = BaseNode & {
 	type:       NodeType.block_if;
-	condition:  Node;
+	condition:  ExpressionNode;
 	consequent: Node[];
-	alternate:  Node | null;
+	alternate:  StatementNode | null;
 }
 
 type Else = BaseNode & {
@@ -191,13 +199,13 @@ type Else = BaseNode & {
 
 type Switch = BaseNode & {
 	type:       NodeType.block_switch;
-	test:       Node;
-	cases:      Node[];
+	test:       ExpressionNode;
+	cases:      (Case | Default)[];
 }
 
 type Case = BaseNode & {
 	type:       NodeType.block_case;
-	values:     Node[];
+	values:     ExpressionNode[];
 	body:       Node[];
 }
 
@@ -210,7 +218,7 @@ type For = BaseNode & {
 	type:       NodeType.block_for;
 	iterator:   string;
 	index:      string | null;
-	iterable:   Node;
+	iterable:   ExpressionNode;
 	body:       Node[];
 }
 
@@ -241,33 +249,33 @@ type Into = BaseNode & {
 
 type Expression = BaseNode & {
 	type:       NodeType.expression;
-	value:      Node;
+	value:      ExpressionNode;
 }
 
 type ExpressionConditional = BaseNode & {
 	type:       NodeType.expression_conditional;
-	condition:  Node;
-	consequent: Node;
-	alternate:  Node;
+	condition:  ExpressionNode;
+	consequent: ExpressionNode;
+	alternate:  ExpressionNode;
 }
 
 type ExpressionBinary = BaseNode & {
 	type:       NodeType.expression_binary;
-	left:       Node;
+	left:       ExpressionNode;
 	operator:   TokenType;
-	right:      Node;
+	right:      ExpressionNode;
 }
 
 type ExpressionUnary = BaseNode & {
 	type:       NodeType.expression_unary;
 	operator:   TokenType;
-	operand:    Node;
+	operand:    ExpressionNode;
 }
 
 type ExpressionMember = BaseNode & {
 	type:       NodeType.expression_member,
-	object:     Node;
-	property:   Node;
+	object:     ExpressionNode;
+	property:   ExpressionNode;
 }
 
 type Identifier = BaseNode & {
@@ -1393,7 +1401,7 @@ class Parser {
 			type:       NodeType.block_if,
 			condition:  condition,
 			consequent: consequent,
-			alternate:  alternate,
+			alternate:  alternate as Else | null,
 		};
 	}
 
@@ -1421,7 +1429,7 @@ class Parser {
 
 		this.expect_token(TokenType.expr_end);
 
-		const case_nodes: Node[] = [];
+		const case_nodes: (Case | Default)[] = [];
 
 		while (true) {
 			const current = this.current_token();
@@ -1432,12 +1440,12 @@ class Parser {
 				const keyword = this.current_token();
 
 				if (keyword.type === TokenType.case_start) {
-					case_nodes.push(this.parse_case_block());
+					case_nodes.push(this.parse_case_block() as Case);
 					continue;
 				}
 
 				if (keyword.type === TokenType.default_start) {
-					case_nodes.push(this.parse_default_block());
+					case_nodes.push(this.parse_default_block() as Default);
 					continue;
 				}
 
@@ -1661,7 +1669,7 @@ class Parser {
 		};
 	}
 
-	private parse_expression(): Node {
+	private parse_expression(): ExpressionNode {
 		return this.parse_conditional_expression();
 	}
 
@@ -1689,7 +1697,7 @@ class Parser {
 		};
 	}
 
-	private parse_conditional_expression(): Node {
+	private parse_conditional_expression(): ExpressionNode {
 		const left = this.parse_logical_or();
 
 		if (this.is_current_token(TokenType.question_mark)) {
@@ -1712,8 +1720,8 @@ class Parser {
 		return left;
 	}
 
-	private parse_binary_expression(operators: TokenType[], subexpression: () => Node): Node {
-		let left = subexpression.call(this);
+	private parse_binary_expression(operators: TokenType[], higher_precedence: () => ExpressionNode): ExpressionNode {
+		let left = higher_precedence.call(this);
 
 		while (this.is_current_token_any(operators)) {
 			const token = this.current_token();
@@ -1721,7 +1729,7 @@ class Parser {
 
 			this.advance_token();
 
-			const right = subexpression.call(this);
+			const right = higher_precedence.call(this);
 
 			left = {
 				type:     NodeType.expression_binary,
@@ -1734,22 +1742,22 @@ class Parser {
 		return left;
 	}
 
-	private parse_logical_or(): Node {
+	private parse_logical_or(): ExpressionNode {
 		const operators = [TokenType.logical_or];
 		return this.parse_binary_expression(operators, this.parse_logical_and);
 	}
 
-	private parse_logical_and(): Node {
+	private parse_logical_and(): ExpressionNode {
 		const operators = [TokenType.logical_and];
 		return this.parse_binary_expression(operators, this.parse_equality);
 	}
 
-	private parse_equality(): Node {
+	private parse_equality(): ExpressionNode {
 		const operators = [TokenType.equal, TokenType.not_equal];
 		return this.parse_binary_expression(operators, this.parse_relational);
 	}
 
-	private parse_relational(): Node {
+	private parse_relational(): ExpressionNode {
 		const operators = [
 			TokenType.less_than,
 			TokenType.greater_than,
@@ -1760,17 +1768,17 @@ class Parser {
 		return this.parse_binary_expression(operators, this.parse_additive);
 	}
 
-	private parse_additive(): Node {
+	private parse_additive(): ExpressionNode {
 		const operators = [TokenType.plus, TokenType.minus];
 		return this.parse_binary_expression(operators, this.parse_multiplicative);
 	}
 
-	private parse_multiplicative(): Node {
+	private parse_multiplicative(): ExpressionNode {
 		const operators = [TokenType.multiplication, TokenType.division];
 		return this.parse_binary_expression(operators, this.parse_unary);
 	}
 
-	private parse_unary(): Node {
+	private parse_unary(): ExpressionNode {
 		const token = this.current_token();
 
 		if (token.type === TokenType.minus || token.type === TokenType.exclamation_mark) {
@@ -1790,7 +1798,7 @@ class Parser {
 		return this.parse_primary();
 	}
 
-	private parse_parenthesis(): Node {
+	private parse_parenthesis(): ExpressionNode {
 		this.advance_token();
 
 		const expression = this.parse_expression();
@@ -1799,7 +1807,7 @@ class Parser {
 		return expression;
 	}
 
-	private parse_integer(): Node {
+	private parse_integer(): ExpressionNode {
 		const token = this.advance_token();
 
 		return {
@@ -1808,7 +1816,7 @@ class Parser {
 		};
 	}
 
-	private parse_float(): Node {
+	private parse_float(): ExpressionNode {
 		const token = this.advance_token();
 
 		return {
@@ -1817,7 +1825,7 @@ class Parser {
 		};
 	}
 
-	private parse_boolean(): Node {
+	private parse_boolean(): ExpressionNode {
 		const token = this.advance_token();
 
 		return {
@@ -1826,7 +1834,7 @@ class Parser {
 		};
 	}
 
-	private parse_string(): Node {
+	private parse_string(): ExpressionNode {
 		const token = this.advance_token();
 
 		return {
@@ -1835,7 +1843,7 @@ class Parser {
 		};
 	}
 
-	private parse_null(): Node {
+	private parse_null(): ExpressionNode {
 		this.advance_token();
 
 		return {
@@ -1844,10 +1852,10 @@ class Parser {
 		};
 	}
 
-	private parse_identifier(): Node {
+	private parse_identifier(): ExpressionNode {
 		const token = this.current_token();
 
-		let left: Node = {
+		let left: ExpressionNode = {
 			type: NodeType.identifier,
 			name: token.value
 		};
@@ -1886,7 +1894,7 @@ class Parser {
 
 				left = {
 					type:       NodeType.function_call,
-					identifier: left,
+					identifier: left as Identifier,
 					args:       argument_list,
 				};
 			} else {
@@ -1901,14 +1909,14 @@ class Parser {
 		const pairs: KeyValue[] = [];
 
 		while (true) {
-			const key = this.expect_token(TokenType.identifier);
+			const key = this.expect_token(TokenType.identifier).value;
 
 			this.expect_token(TokenType.colon);
 
 			const value = this.parse_expression();
 
 			pairs.push({
-				key: key.value,
+				key:   key,
 				value: value
 			});
 
@@ -1924,7 +1932,7 @@ class Parser {
 		return pairs;
 	}
 
-	private parse_primary(): Node {
+	private parse_primary(): ExpressionNode {
 		const current = this.current_token();
 
 		switch (current.type) {
@@ -1976,8 +1984,8 @@ class Parser {
 		}
 	}
 
-	private parse_argument_list(end_token_type: TokenType, allow_empty = true): Node[] {
-		const argument_list: Node[] = [];
+	private parse_argument_list(end_token_type: TokenType, allow_empty = true): ExpressionNode[] {
+		const argument_list: ExpressionNode[] = [];
 
 		if (allow_empty && this.current_token().type === end_token_type) {
 			return argument_list;
@@ -2127,6 +2135,14 @@ class Parser {
 	}
 }
 
+class Renderer {
+	output: string = "";
+
+	render() {
+		return this.output;
+	}
+}
+
 export class TemplateEngine {
 	private templates: Record<string, any> = {};
 	private imports: Record<string, string[]> = {};
@@ -2142,7 +2158,7 @@ export class TemplateEngine {
 			this.imports[template_name] = template.imports;
 
 			if (this.check_import_cycles()) {
-				 // @todo -- remove line/column or throw earlier?
+				 // @nocheckin
 				throw {
 					message: `Import cycle in template "${template_name}"`,
 					line:    -1,
@@ -2160,19 +2176,18 @@ export class TemplateEngine {
 		try {
 			const lexer    = new Lexer(content);
 			const tokens   = lexer.tokenize();
+			const parser   = new Parser(tokens);
+			const template = parser.parse() as Template;
 
 			for (const token of tokens) {
 				lexer.print_token(token);
 			}
 
-			const parser   = new Parser(tokens);
-			const template = parser.parse() as Template;
-
 			this.templates[template_name] = template.body;
 			this.imports[template_name] = template.imports;
 
 			if (this.check_import_cycles()) {
-				 // @todo -- remove line/column
+				 // @nocheckin
 				throw {
 					message: `Import cycle in template "${template_name}"`,
 					line:    -1,
@@ -2180,7 +2195,7 @@ export class TemplateEngine {
 				} as TemplateError;
 			}
 
-			parser.print_node(ast);
+			parser.print_node(template);
 
 			return template;
 		} catch({ message, line, column}: any) {
@@ -2238,6 +2253,11 @@ export class TemplateEngine {
 
 		return result.length < Object.keys(degrees).length;
 	}
+
+	render(name: string, context: any): string {
+		const renderer = new Renderer();
+		return renderer.output;
+	}
 }
 
 try {
@@ -2248,93 +2268,99 @@ try {
 		{insert "other.html" (date: "now", other: 2 > 2)}
 	`);
 
-	t.debug("b.html", `
-		{insert "template.html" (date: "now", other: 2 > 2)}
-		{insert "template.html" (date: "then", other: 2 < 2)}
+	// t.compile('a.html', `
+	// 	{insert "b.html" (date: "now", other: 2 > 2)}
+	// 	{insert "other.html" (date: "now", other: 2 > 2)}
+	// `);
 
-		{use "button" (date: "other")}
-			<div>{date}</div>
+	// const ast = t.compile("b.html", `
+	// 	{insert "template.html" (date: "now", other: 2 > 2)}
+	// 	{insert "template.html" (date: "then", other: 2 < 2)}
+	//
+	// 	{use "button" (date: "other")}
+	// 		<div>{date}</div>
+	//
+	// 		{into "title"}
+	// 			<span>new title</span>
+	// 		{/into}
+	// 	{/use}
+	//
+	//
+	// 	{use "button"}
+	// 		<div>{date}</div>
+	// 	{/use}
+	//
+	// 	// slots
+	// 	<div>
+	// 		{slot "title"}
+	// 			<div>def</div>
+	// 		{/slot}
+	//
+	// 		<button>
+	// 			{slot}
+	// 				// default slot
+	// 			{/slot}
+	// 		</button>
+	// 	</div>
+	//
+	// 	// expressions
+	// 	<div>{2 + 2}</div>
+	// 	<div>{2 + 2 == 4 ? 'yes' : 'no'}</div>
+	// 	<div>{item}</div>
+	// 	<div>{item.id}</div>
+	// 	<div>{item[var].id}</div>
+	//
+	// 	// loop
+	// 	{for item, index in items}
+	// 		{if condition}
+	// 			<!-- ... -->
+	// 		{else if condition_2}
+	// 			<!-- ... -->
+	// 		{else}
+	// 			<!-- ... -->
+	// 		{/if}
+	// 	{/for}
+	//
+	// 	// if block
+	// 	{if condition}
+	// 		<!-- ... -->
+	// 	{else if condition_2}
+	// 		<!-- ... -->
+	// 	{else}
+	// 		<!-- ... -->
+	// 	{/if}
+	//
+	// 	// switch block
+	// 	{switch var}
+	// 		{case 2 + 2}
+	// 			<!-- ... -->
+	//
+	// 		{case 'test_1', 'test_2'}
+	// 			<!-- ... -->
+	//
+	// 		{default}
+	// 			<!-- ... -->
+	// 	{/switch}
+	//
+	// 	// expression inside css
+	// 	<style>
+	// 		html {
+	// 			color: @{value};
+	// 		}
+	// 	</style>
+	//
+	// 	// expression inside js
+	// 	<script>
+	// 		if (true) {
+	// 			const test = [
+	// 				@{for n in nn}
+	// 					@{n}
+	// 				@{/for}
+	// 			];
+	// 		}
+	// 	</script>
+	// `);
 
-			{into "title"}
-				<span>new title</span>
-			{/into}
-		{/use}
-
-
-		{use "button"}
-			<div>{date}</div>
-		{/use}
-
-		// slots
-		<div>
-			{slot "title"}
-				<div>def</div>
-			{/slot}
-
-			<button>
-				{slot}
-					// default slot
-				{/slot}
-			</button>
-		</div>
-
-		// expressions
-		<div>{2 + 2}</div>
-		<div>{2 + 2 == 4 ? 'yes' : 'no'}</div>
-		<div>{item}</div>
-		<div>{item.id}</div>
-		<div>{item[var].id}</div>
-
-		// loop
-		{for item, index in items}
-			{if condition}
-				<!-- ... -->
-			{else if condition_2}
-				<!-- ... -->
-			{else}
-				<!-- ... -->
-			{/if}
-		{/for}
-
-		// if block
-		{if condition}
-			<!-- ... -->
-		{else if condition_2}
-			<!-- ... -->
-		{else}
-			<!-- ... -->
-		{/if}
-
-		// switch block
-		{switch var}
-			{case 2 + 2}
-				<!-- ... -->
-
-			{case 'test_1', 'test_2'}
-				<!-- ... -->
-
-			{default}
-				<!-- ... -->
-		{/switch}
-
-		// expression inside css
-		<style>
-			html {
-				color: @{value};
-			}
-		</style>
-
-		// expression inside js
-		<script>
-			if (true) {
-				const test = [
-					@{for n in nn}
-						@{n}
-					@{/for}
-				];
-			}
-		</script>
-	`);
 } catch(error: any) {
 	console.error(error.message);
 }
