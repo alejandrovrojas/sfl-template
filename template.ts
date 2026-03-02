@@ -1,9 +1,3 @@
-enum ParseError {
-	UnknownToken           = "UnknownToken",
-	UnexpectedToken        = "UnexpectedToken",
-	UnexpectedEndOfFile    = "UnexpectedEndOfFile"
-}
-
 enum TokenType {
 	eof                    = "eof",
 	comment                = "comment",
@@ -31,8 +25,6 @@ enum TokenType {
 	use_end                = "use_end",
 	slot_start             = "slot_start",
 	slot_end               = "slot_end",
-	into_start             = "into_start",
-	into_end               = "into_end",
 	plus                   = "plus",
 	minus                  = "minus",
 	multiplication         = "multiplication",
@@ -45,8 +37,8 @@ enum TokenType {
 	greater_equal          = "greater_equal",
 	logical_and            = "logical_and",
 	logical_or             = "logical_or",
-	l_paren                = "l_paren",
-	r_paren                = "r_paren",
+	l_parenthesis          = "l_parenthesis",
+	r_parenthesis          = "r_parenthesis",
 	l_bracket              = "l_bracket",
 	r_bracket              = "r_bracket",
 	underscore             = "underscore",
@@ -55,6 +47,7 @@ enum TokenType {
 	colon                  = "colon",
 	exclamation_mark       = "exclamation_mark",
 	question_mark          = "question_mark",
+	modulo                 = "modulo",
 	boolean                = "boolean",
 	string                 = "string",
 	integer                = "integer",
@@ -68,6 +61,7 @@ enum NodeType {
 	template               = "template",
 	text                   = "text",
 	comment                = "comment",
+	block                  = "block",
 	block_if               = "block_if",
 	block_else             = "block_else",
 	block_switch           = "block_switch",
@@ -76,7 +70,6 @@ enum NodeType {
 	block_for              = "block_for",
 	block_slot             = "block_slot",
 	block_use              = "block_use",
-	block_into             = "block_into",
 	insert                 = "insert",
 	literal_null           = "literal_null",
 	literal_int            = "literal_int",
@@ -101,41 +94,41 @@ enum LexerMode {
 	expr                   = "expr"
 }
 
-type ExpressionNode =
+type Literal =
+	| LiteralString
+	| LiteralFloat
+	| LiteralInt
+	| LiteralBoolean
+	| LiteralNull;
+
+type Expression =
 	| ExpressionBinary
 	| ExpressionConditional
 	| ExpressionMember
 	| ExpressionUnary
 	| FunctionCall
 	| Identifier
-	| LiteralBoolean
-	| LiteralFloat
-	| LiteralInt
-	| LiteralNull
-	| LiteralString
+	| Literal;
 
-type StatementNode =
+type Statement =
+	| Block
 	| If
-	| Else
 	| Switch
 	| Case
-	| Default
 	| For
 	| Insert
 	| Use
-	| Slot
-	| Into;
+	| Slot;
 
-type ContentNode =
+type Content =
+	| Statement
 	| Expression
-	| PlainText
-	| PlainComment
+	| Text
+	| Comment;
 
 type Node =
-	| Template
-	| ExpressionNode
-	| StatementNode
-	| ContentNode;
+	| Content
+	| Template;
 
 type TemplateError = {
 	message:    string;
@@ -154,156 +147,136 @@ type TokenPosition = {
 	column:     number;
 }
 
-type BaseNode = {
-	type:       NodeType;
-}
-
-type Template = BaseNode & {
+type Template = {
 	type:       NodeType.template;
-	body:       Node[];
 	imports:    string[]
+	body:       Block;
 }
 
-type PlainComment = BaseNode & {
+type Block = {
+	type:       NodeType.block;
+	body:       Content[];
+}
+
+type Comment = {
 	type:       NodeType.comment;
 	value:      string;
 }
 
-type PlainText = BaseNode & {
+type Text = {
 	type:       NodeType.text;
 	value:      string;
 }
 
-type FunctionCall = BaseNode & {
+type FunctionCall = {
 	type:       NodeType.function_call;
 	identifier: Identifier;
-	args:       ExpressionNode[];
+	args:       Expression[];
 }
 
 type KeyValue = {
 	key:        string;
-	value:      ExpressionNode;
+	value:      Expression;
 }
 
-type If = BaseNode & {
+type If = {
 	type:       NodeType.block_if;
-	condition:  ExpressionNode;
-	consequent: Node[];
-	alternate:  StatementNode | null;
+	condition:  Expression;
+	consequent: Block;
+	alternate:  Block | If | null;
 }
 
-type Else = BaseNode & {
-	type:       NodeType.block_else;
-	body:       Node[];
-}
-
-type Switch = BaseNode & {
+type Switch = {
 	type:       NodeType.block_switch;
-	test:       ExpressionNode;
-	cases:      (Case | Default)[];
+	test:       Expression;
+	cases:      Case[];
 }
 
-type Case = BaseNode & {
+type Case = {
 	type:       NodeType.block_case;
-	values:     ExpressionNode[];
-	body:       Node[];
+	tests:      Expression[] | null;
+	body:       Block;
 }
 
-type Default = BaseNode & {
-	type:       NodeType.block_default;
-	body:       Node[];
-}
-
-type For = BaseNode & {
+type For = {
 	type:       NodeType.block_for;
 	iterator:   string;
 	index:      string | null;
-	iterable:   ExpressionNode;
-	body:       Node[];
+	iterable:   Expression;
+	body:       Block;
 }
 
-type Insert = BaseNode & {
+type Insert = {
 	type:       NodeType.insert;
 	template:   string;
-	values:     KeyValue[]
+	values:     KeyValue[];
 }
 
-type Use = BaseNode & {
+type Use = {
 	type:       NodeType.block_use;
 	template:   string;
-	values:     KeyValue[]
-	into:       Node[];
+	values:     KeyValue[];
+	slots:      Slot[];
 }
 
-type Slot = BaseNode & {
+type Slot = {
 	type:       NodeType.block_slot;
 	name:       string | null;
-	body:       Node[];
+	body:       Block;
 }
 
-type Into = BaseNode & {
-	type:       NodeType.block_into;
-	name:       string | null;
-	body:       Node[];
-}
-
-type Expression = BaseNode & {
-	type:       NodeType.expression;
-	value:      ExpressionNode;
-}
-
-type ExpressionConditional = BaseNode & {
+type ExpressionConditional = {
 	type:       NodeType.expression_conditional;
-	condition:  ExpressionNode;
-	consequent: ExpressionNode;
-	alternate:  ExpressionNode;
+	condition:  Expression;
+	consequent: Expression;
+	alternate:  Expression;
 }
 
-type ExpressionBinary = BaseNode & {
+type ExpressionBinary = {
 	type:       NodeType.expression_binary;
-	left:       ExpressionNode;
+	left:       Expression;
 	operator:   TokenType;
-	right:      ExpressionNode;
+	right:      Expression;
 }
 
-type ExpressionUnary = BaseNode & {
+type ExpressionUnary = {
 	type:       NodeType.expression_unary;
 	operator:   TokenType;
-	operand:    ExpressionNode;
+	operand:    Expression;
 }
 
-type ExpressionMember = BaseNode & {
+type ExpressionMember = {
 	type:       NodeType.expression_member,
-	object:     ExpressionNode;
-	property:   ExpressionNode;
+	object:     Expression;
+	property:   Expression;
 }
 
-type Identifier = BaseNode & {
+type Identifier = {
 	type:       NodeType.identifier;
 	name:       string;
 }
 
-type LiteralInt = BaseNode & {
+type LiteralInt = {
 	type:       NodeType.literal_int;
 	value:      number;
 }
 
-type LiteralFloat = BaseNode & {
+type LiteralFloat = {
 	type:       NodeType.literal_float;
 	value:      number;
 }
 
-type LiteralString = BaseNode & {
+type LiteralString = {
 	type:       NodeType.literal_string;
 	value:      string;
 }
 
-type LiteralBoolean = BaseNode & {
+type LiteralBoolean = {
 	type:       NodeType.literal_boolean;
 	value:      boolean;
 }
 
-type LiteralNull = BaseNode & {
+type LiteralNull = {
 	type:       NodeType.literal_null;
 	value:      null;
 }
@@ -332,7 +305,7 @@ class Lexer {
 	}
 
 	private is_keyword_boundary(ch: string): boolean {
-		return this.is_whitespace(ch) || ch === '}'; // kind of flaky
+		return this.is_whitespace(ch) || ch === '}' || ch == ']'; // kind of flaky
 	}
 
 	private is_alpha(ch: string): boolean {
@@ -411,6 +384,7 @@ class Lexer {
 		while (this.cursor < this.input.length) {
 			const ch = this.input[this.cursor];
 
+			// @note -- probably too drastic for newlines inside text?
 			if (ch === '\n' || ch === '\r') {
 				break;
 			}
@@ -657,22 +631,6 @@ class Lexer {
 							return this.create_token(start_cursor, start_position);
 						}
 
-						// {/into}
-						if (
-							this.cursor + 5 <= this.input.length &&
-							this.input[this.cursor + 1] === 'i' &&
-							this.input[this.cursor + 2] === 'n' &&
-							this.input[this.cursor + 3] === 't' &&
-							this.input[this.cursor + 4] === 'o'
-						) {
-							for (let i = 0; i < 5; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.into_end;
-							return this.create_token(start_cursor, start_position);
-						}
-
 						// {/for}
 						if (
 							this.cursor + 4 <= this.input.length &&
@@ -805,28 +763,32 @@ class Lexer {
 					}
 
 					case '|': {
-						// use "or"?
-						this.advance_ch();
-						this.type = TokenType.logical_or;
-						return this.create_token(start_cursor, start_position);
+						if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '|') {
+							this.advance_ch();
+							this.advance_ch();
+							this.type = TokenType.logical_or;
+							return this.create_token(start_cursor, start_position);
+						}
 					}
 
 					case '&': {
-						// use "and"?
-						this.advance_ch();
-						this.type = TokenType.logical_and;
-						return this.create_token(start_cursor, start_position);
+						if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '&') {
+							this.advance_ch();
+							this.advance_ch();
+							this.type = TokenType.logical_and;
+							return this.create_token(start_cursor, start_position);
+						}
 					}
 
 					case '(': {
 						this.advance_ch();
-						this.type = TokenType.l_paren;
+						this.type = TokenType.l_parenthesis;
 						return this.create_token(start_cursor, start_position);
 					}
 
 					case ')': {
 						this.advance_ch();
-						this.type = TokenType.r_paren;
+						this.type = TokenType.r_parenthesis;
 						return this.create_token(start_cursor, start_position);
 					}
 
@@ -869,6 +831,12 @@ class Lexer {
 					case '?': {
 						this.advance_ch();
 						this.type = TokenType.question_mark;
+						return this.create_token(start_cursor, start_position);
+					}
+
+					case '%': {
+						this.advance_ch();
+						this.type = TokenType.modulo;
 						return this.create_token(start_cursor, start_position);
 					}
 
@@ -977,23 +945,6 @@ class Lexer {
 							}
 
 							this.type = TokenType.slot_start;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// into
-						if (
-							this.cursor + 5 <= this.input.length &&
-							this.input[this.cursor]     === 'i' &&
-							this.input[this.cursor + 1] === 'n' &&
-							this.input[this.cursor + 2] === 't' &&
-							this.input[this.cursor + 3] === 'o' &&
-							this.is_keyword_boundary(this.input[this.cursor + 4])
-						) {
-							for (let i = 0; i < 4; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.into_start;
 							return this.create_token(start_cursor, start_position);
 						}
 
@@ -1327,8 +1278,8 @@ class Parser {
 		return false;
 	}
 
-	private parse_until(end_tokens: TokenType[]): Node[] {
-		const nodes: Node[] = [];
+	private parse_until(end_tokens: TokenType[]): Content[] {
+		const nodes: Content[] = [];
 
 		while (true) {
 			const next = this.peek_token();
@@ -1341,12 +1292,11 @@ class Parser {
 				}
 			}
 
-			const node = this.parse_statement();
-			nodes.push(node);
+			nodes.push(this.parse_body());
 		}
 	}
 
-	private parse_text(): Node {
+	private parse_text(): Text {
 		const token = this.advance_token();
 
 		return {
@@ -1355,7 +1305,7 @@ class Parser {
 		};
 	}
 
-	private parse_comment(): Node {
+	private parse_comment(): Comment {
 		const token = this.advance_token();
 
 		return {
@@ -1364,23 +1314,26 @@ class Parser {
 		};
 	}
 
-	private parse_if_block(): Node {
+	private parse_if_block(): If {
 		return this.parse_if_sequence(false);
 	}
 
-	private parse_if_sequence(is_nested: boolean): Node {
+	private parse_if_sequence(is_nested: boolean): If {
 		this.expect_token(TokenType.if_start);
 
 		const condition = this.parse_expression();
 
 		this.expect_token(TokenType.expr_end);
 
-		const consequent = this.parse_until([
-			TokenType.else_start,
-			TokenType.if_end
-		]);
+		const consequent: Block = {
+			type: NodeType.block,
+			body: this.parse_until([
+				TokenType.else_start,
+				TokenType.if_end
+			])
+		};
 
-		let alternate: Node | null = null;
+		let alternate: If | Block | null = null;
 
 		if (this.is_current_token(TokenType.expr_start)) {
 			const next = this.peek_token();
@@ -1401,11 +1354,11 @@ class Parser {
 			type:       NodeType.block_if,
 			condition:  condition,
 			consequent: consequent,
-			alternate:  alternate as Else | null,
+			alternate:  alternate
 		};
 	}
 
-	private parse_else_block(): Node {
+	private parse_else_block(): If | Block {
 		this.expect_token(TokenType.else_start);
 
 		if (this.is_current_token(TokenType.if_start)) {
@@ -1417,19 +1370,19 @@ class Parser {
 		const body_nodes = this.parse_until([TokenType.if_end]);
 
 		return {
-			type: NodeType.block_else,
-			body: body_nodes,
+			type: NodeType.block,
+			body: body_nodes
 		};
 	}
 
-	private parse_switch_block(): Node {
+	private parse_switch_block(): Switch {
 		this.expect_token(TokenType.switch_start);
 
 		const test = this.parse_expression();
 
 		this.expect_token(TokenType.expr_end);
 
-		const case_nodes: (Case | Default)[] = [];
+		const case_nodes: Case[] = [];
 
 		while (true) {
 			const current = this.current_token();
@@ -1440,12 +1393,12 @@ class Parser {
 				const keyword = this.current_token();
 
 				if (keyword.type === TokenType.case_start) {
-					case_nodes.push(this.parse_case_block() as Case);
+					case_nodes.push(this.parse_case_block());
 					continue;
 				}
 
 				if (keyword.type === TokenType.default_start) {
-					case_nodes.push(this.parse_default_block() as Default);
+					case_nodes.push(this.parse_default_block());
 					continue;
 				}
 
@@ -1472,7 +1425,7 @@ class Parser {
 		};
 	}
 
-	private parse_case_block(): Node {
+	private parse_case_block(): Case {
 		this.expect_token(TokenType.case_start);
 
 		const case_values = this.parse_argument_list(TokenType.expr_end, false);
@@ -1485,110 +1438,124 @@ class Parser {
 			TokenType.switch_end,
 		]);
 
+		const body: Block = {
+			type: NodeType.block,
+			body: body_nodes
+		}
+
 		return {
-			type:   NodeType.block_case,
-			values: case_values,
-			body:   body_nodes,
+			type:  NodeType.block_case,
+			tests: case_values,
+			body:  body
 		};
 	}
 
-	private parse_default_block(): Node {
+	private parse_default_block(): Case {
 		this.expect_token(TokenType.default_start);
 		this.expect_token(TokenType.expr_end);
 
 		const body_nodes = this.parse_until([TokenType.switch_end]);
 
+		const body: Block = {
+			type: NodeType.block,
+			body: body_nodes
+		}
+
 		return {
-			type: NodeType.block_default,
-			body: body_nodes,
+			type:  NodeType.block_case,
+			tests: null,
+			body:  body
 		};
 	}
 
-	private parse_insert_block(): Node {
+	private parse_insert_block(): Insert {
 		this.advance_token();
 
 		const template = this.expect_token(TokenType.string);
 
 		let values: KeyValue[] = [];
 
-		if (this.current_token().type == TokenType.l_paren) {
+		if (this.current_token().type == TokenType.l_parenthesis) {
 			this.advance_token();
 			values = this.parse_key_value_list();
-			this.expect_token(TokenType.r_paren);
+			this.expect_token(TokenType.r_parenthesis);
 		}
 
 		this.expect_token(TokenType.expr_end);
 
 		return {
-			type: NodeType.insert,
+			type:     NodeType.insert,
 			template: template.value,
-			values: values
+			values:   values
 		}
 	}
 
-	private parse_use_block(): Node {
+	private parse_use_block(): Use {
 		this.advance_token();
 
 		const template = this.expect_token(TokenType.string);
 
 		let values: KeyValue[] = [];
 
-		if (this.current_token().type == TokenType.l_paren) {
+		if (this.current_token().type == TokenType.l_parenthesis) {
 			this.advance_token();
 			values = this.parse_key_value_list();
-			this.expect_token(TokenType.r_paren);
+			this.expect_token(TokenType.r_parenthesis);
 		}
 
 		this.expect_token(TokenType.expr_end);
 
-		const into_default: Into = {
-			type: NodeType.block_into,
+		const default_body_nodes = this.parse_until([
+			TokenType.slot_start,
+			TokenType.use_end
+		]);
+
+		const default_slot: Slot = {
+			type: NodeType.block_slot,
 			name: null,
-			body: this.parse_until([
-				TokenType.into_start,
-				TokenType.use_end,
-			])
+			body: {
+				type: NodeType.block,
+				body: default_body_nodes
+			}
 		};
 
-		const into_nodes: Node[] = [];
+		const slot_nodes: Slot[] = [];
 
-		if (into_default.body.length > 0) {
-			into_nodes.push(into_default);
+		if (default_body_nodes.length > 0) {
+			slot_nodes.push(default_slot);
 		}
 
 		this.expect_token(TokenType.expr_start);
 
-		const current = this.current_token();
+		while (true) {
+			const current = this.current_token();
 
-		if (current.type === TokenType.use_end) {
-			this.expect_token(TokenType.use_end);
-			this.expect_token(TokenType.expr_end);
-		} else {
-			while (true) {
-				if (current.type === TokenType.into_start) {
-					into_nodes.push(this.parse_into_block());
-					break;
-				}
+			if (current.type === TokenType.use_end) {
+				this.expect_token(TokenType.use_end);
+				this.expect_token(TokenType.expr_end);
+				break;
+			} else if (current.type === TokenType.slot_start) {
+				slot_nodes.push(this.parse_slot_block());
+			} else if (current.type === TokenType.eof) {
+				throw {
+					message: `Unexpected end of file`,
+					line:    current.position.line,
+					column:  current.position.column
+				} as TemplateError;
+			} else {
+				this.advance_token();
 			}
-
-			this.expect_token(TokenType.expr_start);
-			this.expect_token(TokenType.use_end);
-			this.expect_token(TokenType.expr_end);
-		}
-
-		if (into_nodes.length === 0) {
-			// empty {use} block -- console.warn?
 		}
 
 		return {
 			type:     NodeType.block_use,
 			template: template.value,
 			values:   values,
-			into:     into_nodes
-		}
+			slots:    slot_nodes
+		};
 	}
 
-	private parse_slot_block(): Node {
+	private parse_slot_block(): Slot {
 		this.advance_token();
 
 		let name: Token | null = null;
@@ -1599,46 +1566,28 @@ class Parser {
 
 		this.expect_token(TokenType.expr_end);
 
-		const body = this.parse_until([TokenType.slot_end]);
+		const body_nodes = this.parse_until([TokenType.slot_end]);
 
 		this.expect_token(TokenType.expr_start);
 		this.expect_token(TokenType.slot_end);
 		this.expect_token(TokenType.expr_end);
 
-		return {
-			type:     NodeType.block_slot,
-			name:     name?.value || null,
-			body:     body
+		const slot_body: Block = {
+			type: NodeType.block,
+			body: body_nodes
 		}
-	}
-
-	private parse_into_block(): Node {
-		this.advance_token();
-
-		const name = this.expect_token(TokenType.string);
-
-		this.expect_token(TokenType.expr_end);
-
-		const body = this.parse_until([
-			TokenType.into_end
-		]);
-
-		this.expect_token(TokenType.expr_start);
-		this.expect_token(TokenType.into_end);
-		this.expect_token(TokenType.expr_end);
 
 		return {
-			type:     NodeType.block_into,
-			name:     name.value,
-			body:     body
-		}
+			type: NodeType.block_slot,
+			name: name?.value || null,
+			body: slot_body
+		};
 	}
 
-	private parse_for_block(): Node {
+	private parse_for_block(): For {
 		this.expect_token(TokenType.for_start);
 
 		const iterator = this.expect_token(TokenType.identifier).value;
-
 		let index: string | null = null;
 
 		if (this.is_current_token(TokenType.comma)) {
@@ -1660,44 +1609,43 @@ class Parser {
 		this.expect_token(TokenType.for_end);
 		this.expect_token(TokenType.expr_end);
 
+		const for_body: Block = {
+			type: NodeType.block,
+			body: body_nodes
+		}
+
 		return {
 			type:     NodeType.block_for,
 			iterator: iterator,
 			index:    index,
 			iterable: iterable,
-			body:     body_nodes,
+			body:     for_body
 		};
 	}
 
-	private parse_expression(): ExpressionNode {
-		return this.parse_conditional_expression();
-	}
-
-	private parse_expression_block(): Node {
+	private parse_expression_block(): Expression {
 		const token = this.current_token();
 
 		if (token.type === TokenType.expr_end) {
 			this.advance_token();
 
 			return {
-				type:  NodeType.expression,
-				value: {
-					type:  NodeType.literal_null,
-					value: null,
-				}
+				type:  NodeType.literal_null,
+				value: null,
 			};
 		}
 
-		const expression = this.parse_expression();
+		const expression = this.parse_conditional_expression();
 		this.expect_token(TokenType.expr_end);
 
-		return {
-			type:  NodeType.expression,
-			value: expression,
-		};
+		return expression;
 	}
 
-	private parse_conditional_expression(): ExpressionNode {
+	private parse_expression(): Expression {
+		return this.parse_conditional_expression();
+	}
+
+	private parse_conditional_expression(): Expression {
 		const left = this.parse_logical_or();
 
 		if (this.is_current_token(TokenType.question_mark)) {
@@ -1720,8 +1668,8 @@ class Parser {
 		return left;
 	}
 
-	private parse_binary_expression(operators: TokenType[], higher_precedence: () => ExpressionNode): ExpressionNode {
-		let left = higher_precedence.call(this);
+	private parse_binary_expression(operators: TokenType[], subexpression: () => Expression): Expression {
+		let left = subexpression.call(this);
 
 		while (this.is_current_token_any(operators)) {
 			const token = this.current_token();
@@ -1729,7 +1677,7 @@ class Parser {
 
 			this.advance_token();
 
-			const right = higher_precedence.call(this);
+			const right = subexpression.call(this);
 
 			left = {
 				type:     NodeType.expression_binary,
@@ -1742,22 +1690,22 @@ class Parser {
 		return left;
 	}
 
-	private parse_logical_or(): ExpressionNode {
+	private parse_logical_or(): Expression {
 		const operators = [TokenType.logical_or];
 		return this.parse_binary_expression(operators, this.parse_logical_and);
 	}
 
-	private parse_logical_and(): ExpressionNode {
+	private parse_logical_and(): Expression {
 		const operators = [TokenType.logical_and];
 		return this.parse_binary_expression(operators, this.parse_equality);
 	}
 
-	private parse_equality(): ExpressionNode {
+	private parse_equality(): Expression {
 		const operators = [TokenType.equal, TokenType.not_equal];
 		return this.parse_binary_expression(operators, this.parse_relational);
 	}
 
-	private parse_relational(): ExpressionNode {
+	private parse_relational(): Expression {
 		const operators = [
 			TokenType.less_than,
 			TokenType.greater_than,
@@ -1768,17 +1716,22 @@ class Parser {
 		return this.parse_binary_expression(operators, this.parse_additive);
 	}
 
-	private parse_additive(): ExpressionNode {
+	private parse_additive(): Expression {
 		const operators = [TokenType.plus, TokenType.minus];
 		return this.parse_binary_expression(operators, this.parse_multiplicative);
 	}
 
-	private parse_multiplicative(): ExpressionNode {
+	private parse_multiplicative(): Expression {
 		const operators = [TokenType.multiplication, TokenType.division];
+		return this.parse_binary_expression(operators, this.parse_modulo);
+	}
+
+	private parse_modulo(): Expression {
+		const operators = [TokenType.modulo];
 		return this.parse_binary_expression(operators, this.parse_unary);
 	}
 
-	private parse_unary(): ExpressionNode {
+	private parse_unary(): Expression {
 		const token = this.current_token();
 
 		if (token.type === TokenType.minus || token.type === TokenType.exclamation_mark) {
@@ -1798,16 +1751,68 @@ class Parser {
 		return this.parse_primary();
 	}
 
-	private parse_parenthesis(): ExpressionNode {
+	private parse_primary(): Expression {
+		const current = this.current_token();
+
+		switch (current.type) {
+			case TokenType.l_parenthesis: {
+				return this.parse_parenthesis();
+			}
+
+			case TokenType.integer: {
+				return this.parse_integer();
+			}
+
+			case TokenType.float: {
+				return this.parse_float();
+			}
+
+			case TokenType.string: {
+				return this.parse_string();
+			}
+
+			case TokenType.boolean: {
+				return this.parse_boolean();
+			}
+
+			case TokenType.null:
+			case TokenType.undefined: {
+				return this.parse_null();
+			}
+
+			case TokenType.identifier:
+			case TokenType.insert_start:
+			case TokenType.use_start:
+			case TokenType.slot_start:
+			case TokenType.for_start:
+			case TokenType.for_in:
+			case TokenType.if_start:
+			case TokenType.else_start:
+			case TokenType.switch_start:
+			case TokenType.case_start: {
+				return this.parse_identifier()
+			}
+
+			default: {
+				throw {
+					message: `Unexpected token "${current.value}"`,
+					line:    current.position.line,
+					column:  current.position.column
+				} as TemplateError;
+			}
+		}
+	}
+
+	private parse_parenthesis(): Expression {
 		this.advance_token();
 
 		const expression = this.parse_expression();
-		this.expect_token(TokenType.r_paren);
+		this.expect_token(TokenType.r_parenthesis);
 
 		return expression;
 	}
 
-	private parse_integer(): ExpressionNode {
+	private parse_integer(): LiteralInt {
 		const token = this.advance_token();
 
 		return {
@@ -1816,7 +1821,7 @@ class Parser {
 		};
 	}
 
-	private parse_float(): ExpressionNode {
+	private parse_float(): LiteralFloat {
 		const token = this.advance_token();
 
 		return {
@@ -1825,16 +1830,7 @@ class Parser {
 		};
 	}
 
-	private parse_boolean(): ExpressionNode {
-		const token = this.advance_token();
-
-		return {
-			type:  NodeType.literal_boolean,
-			value: token.value === "true",
-		};
-	}
-
-	private parse_string(): ExpressionNode {
+	private parse_string(): LiteralString {
 		const token = this.advance_token();
 
 		return {
@@ -1843,7 +1839,16 @@ class Parser {
 		};
 	}
 
-	private parse_null(): ExpressionNode {
+	private parse_boolean(): LiteralBoolean {
+		const token = this.advance_token();
+
+		return {
+			type:  NodeType.literal_boolean,
+			value: token.value === "true",
+		};
+	}
+
+	private parse_null(): LiteralNull {
 		this.advance_token();
 
 		return {
@@ -1852,10 +1857,10 @@ class Parser {
 		};
 	}
 
-	private parse_identifier(): ExpressionNode {
+	private parse_identifier(): ExpressionMember | FunctionCall | Identifier {
 		const token = this.current_token();
 
-		let left: ExpressionNode = {
+		let left: Expression = {
 			type: NodeType.identifier,
 			name: token.value
 		};
@@ -1885,12 +1890,12 @@ class Parser {
 					object:   left,
 					property: property,
 				};
-			} else if (this.is_current_token(TokenType.l_paren)) {
+			} else if (this.is_current_token(TokenType.l_parenthesis)) {
 				this.advance_token();
 
-				const argument_list = this.parse_argument_list(TokenType.r_paren);
+				const argument_list = this.parse_argument_list(TokenType.r_parenthesis);
 
-				this.expect_token(TokenType.r_paren);
+				this.expect_token(TokenType.r_parenthesis);
 
 				left = {
 					type:       NodeType.function_call,
@@ -1903,6 +1908,25 @@ class Parser {
 		}
 
 		return left;
+	}
+
+	private parse_argument_list(end_token_type: TokenType, allow_empty = true): Expression[] {
+		const argument_list: Expression[] = [];
+
+		if (allow_empty && this.current_token().type === end_token_type) {
+			return argument_list;
+		}
+
+		const first_arg = this.parse_expression();
+		argument_list.push(first_arg);
+
+		while (this.is_current_token(TokenType.comma)) {
+			this.advance_token();
+			const value = this.parse_expression();
+			argument_list.push(value);
+		}
+
+		return argument_list;
 	}
 
 	private parse_key_value_list(): KeyValue[] {
@@ -1924,7 +1948,7 @@ class Parser {
 				this.advance_token();
 			}
 
-			if (this.is_current_token(TokenType.r_paren)) {
+			if (this.is_current_token(TokenType.r_parenthesis)) {
 				break;
 			}
 		};
@@ -1932,78 +1956,7 @@ class Parser {
 		return pairs;
 	}
 
-	private parse_primary(): ExpressionNode {
-		const current = this.current_token();
-
-		switch (current.type) {
-			case TokenType.l_paren: {
-				return this.parse_parenthesis();
-			}
-
-			case TokenType.integer: {
-				return this.parse_integer();
-			}
-
-			case TokenType.float: {
-				return this.parse_float();
-			}
-
-			case TokenType.string: {
-				return this.parse_string();
-			}
-
-			case TokenType.boolean: {
-				return this.parse_boolean();
-			}
-
-			case TokenType.null:
-				case TokenType.undefined: {
-				return this.parse_null();
-			}
-
-			case TokenType.identifier:
-			case TokenType.insert_start:
-			case TokenType.use_start:
-			case TokenType.slot_start:
-			case TokenType.for_start:
-			case TokenType.for_in:
-			case TokenType.if_start:
-			case TokenType.else_start:
-			case TokenType.switch_start:
-			case TokenType.case_start: {
-				return this.parse_identifier()
-			}
-
-			default: {
-				throw {
-					message: `Unexpected token. Invalid syntax using "${current.value}"`,
-					line:    current.position.line,
-					column:  current.position.column
-				} as TemplateError;
-			}
-		}
-	}
-
-	private parse_argument_list(end_token_type: TokenType, allow_empty = true): ExpressionNode[] {
-		const argument_list: ExpressionNode[] = [];
-
-		if (allow_empty && this.current_token().type === end_token_type) {
-			return argument_list;
-		}
-
-		const first_arg = this.parse_expression();
-		argument_list.push(first_arg);
-
-		while (this.is_current_token(TokenType.comma)) {
-			this.advance_token();
-			const value = this.parse_expression();
-			argument_list.push(value);
-		}
-
-		return argument_list;
-	}
-
-	private parse_statement(): Node {
+	private parse_body(): Content {
 		const current = this.current_token();
 
 		switch (current.type) {
@@ -2049,10 +2002,6 @@ class Parser {
 						return this.parse_if_block();
 					}
 
-					case TokenType.else_start: {
-						return this.parse_else_block();
-					}
-
 					case TokenType.switch_start: {
 						return this.parse_switch_block();
 					}
@@ -2071,10 +2020,6 @@ class Parser {
 
 					case TokenType.slot_start: {
 						return this.parse_slot_block();
-					}
-
-					case TokenType.into_start: {
-						return this.parse_into_block();
 					}
 
 					case TokenType.eof: {
@@ -2109,14 +2054,14 @@ class Parser {
 		}
 	}
 
-	parse(): Node {
-		const body: Node[] = [];
+	parse(): Template {
+		const body: Content[] = [];
 		const imports: string[] = [];
 
 		while (!this.is_current_token(TokenType.eof)) {
-			const node = this.parse_statement();
+			const node = this.parse_body();
 
-			if (node.type === 'insert') {
+			if (node.type === NodeType.insert || node.type === NodeType.block_use) {
 				imports.push(node.template);
 			}
 
@@ -2126,44 +2071,454 @@ class Parser {
 		return {
 			type: NodeType.template,
 			imports: imports,
-			body: body,
+			body: {
+				type: NodeType.block,
+				body: body
+			}
 		};
 	}
 
-	print_node(node: Node): void {
+	print_node(node: Template | Content): void {
 		console.log(JSON.stringify(node, null, 4));
 	}
 }
 
 class Renderer {
-	output: string = "";
+	private template:  Template;
+	private templates: Record<string, Template>    = {};
+	private context:   Record<string, unknown>     = {};
+	private slots:     Map<string | null, string> = new Map();
+
+	constructor(template: Template, templates: Record<string, Template>, context: Record<string, unknown>) {
+		this.template  = template;
+		this.templates = templates;
+		this.context   = context;
+	}
+
+	private eval_literal(node: Literal): string | number | boolean | null | object {
+		return node.value;
+	}
+
+	private eval_identifier(node: Identifier): string | number | boolean | null | object {
+		return this.context[node.name] ?? null;
+	}
+
+	private eval_expression_member(node: ExpressionMember): string | number | boolean | null | object {
+		const object = this.eval_node(node.object);
+		const property = this.eval_node(node.property);
+
+		if (object === null || object === undefined) {
+			return null;
+		}
+
+		if (typeof property !== "string" && typeof property !== "number") {
+			return null;
+		}
+
+		try {
+			return (object as any)[property] ?? null;
+		} catch {
+			return null;
+		}
+	}
+
+	private eval_expression_binary(node: ExpressionBinary): string | number | boolean | null | object {
+		const left = this.eval_node(node.left);
+		const right = this.eval_node(node.right);
+
+		switch (node.operator) {
+			case TokenType.logical_or:
+				return left || right;
+			case TokenType.logical_and:
+				return left && right;
+			case TokenType.not_equal:
+				return (left as unknown) != (right as unknown);
+			case TokenType.equal:
+				return (left as unknown) == (right as unknown);
+			case TokenType.greater_than:
+				return (left as number) > (right as number);
+			case TokenType.less_than:
+				return (left as number) < (right as number);
+			case TokenType.greater_equal:
+				return (left as number) >= (right as number);
+			case TokenType.less_equal:
+				return (left as number) <= (right as number);
+			case TokenType.plus:
+				return (left as number) + (right as number);
+			case TokenType.minus:
+				return (left as number) - (right as number);
+			case TokenType.multiplication:
+				return (left as number) * (right as number);
+			case TokenType.division:
+				return (left as number) / (right as number);
+			case TokenType.modulo:
+				return (left as number) % (right as number);
+			default:
+				throw new Error(`Not implemented: ${node.operator}`);
+		}
+	}
+
+	private eval_expression_conditional(node: ExpressionConditional): string | number | boolean | null | object {
+		if (this.eval_node(node.condition)) {
+			return this.eval_node(node.consequent);
+		} else {
+			return this.eval_node(node.alternate);
+		}
+	}
+
+	private render_comment(_: Comment): string {
+		return "";
+	}
+
+	private render_text(node: Text): string {
+		return node.value;
+	}
+
+	private render_if_block(node: If): string {
+		if (this.eval_node(node.condition)) {
+			return this.render_node(node.consequent);
+		}
+
+		if (node.alternate) {
+			return this.render_node(node.alternate);
+		}
+
+		return "";
+	}
+
+	private render_for_block(node: For): string {
+		const iterable = this.eval_node(node.iterable);
+
+		const initial_iterator = this.context[node.iterator];
+		const initial_index   = this.context[node.index as string];
+
+		let for_block_output = "";
+
+		try {
+			if (iterable === null || iterable === undefined) {
+				return "";
+			}
+
+			if (typeof iterable === 'string') {
+				const loop_string = iterable;
+
+				if (loop_string.length === 0) {
+					return "";
+				}
+
+				for (let i = 0; i < loop_string.length; i++) {
+					this.context[node.iterator] = loop_string[i];
+
+					if (node.index) {
+						this.context[node.index as string] = i;
+					}
+
+					for_block_output += this.render_node(node.body);
+				}
+			} else if (Array.isArray(iterable)) {
+				const loop_array = iterable;
+
+				if (loop_array.length === 0) {
+					return "";
+				}
+
+				for (let i = 0; i < loop_array.length; i++) {
+					this.context[node.iterator] = loop_array[i];
+
+					if (node.index) {
+						this.context[node.index as string] = i;
+					}
+
+					for_block_output += this.render_node(node.body);
+				}
+			} else if (typeof iterable === 'number') {
+				const loop_number = iterable;
+
+				if (loop_number <= 0) {
+					return "";
+				}
+
+				for (let i = 0; i < loop_number; i++) {
+					this.context[node.iterator] = i;
+
+					if (node.index) {
+						this.context[node.index as string] = i;
+					}
+
+					for_block_output += this.render_node(node.body);
+				}
+			} else if (typeof iterable === 'object') {
+				const loop_object = iterable as any;
+				const loop_object_keys = Object.keys(loop_object);
+
+				for (let i = 0; i < loop_object_keys.length; i++) {
+					const key = loop_object_keys[i];
+
+					this.context[node.iterator] = loop_object[key];
+
+					if (node.index) {
+						this.context[node.index as string] = key;
+					}
+
+					for_block_output += this.render_node(node.body);
+				}
+			} else {
+				return "";
+			}
+		} finally {
+			if (initial_iterator) {
+				this.context[node.iterator] = initial_iterator;
+			} else {
+				delete this.context[node.iterator];
+			}
+
+			if (initial_index) {
+				this.context[node.index as string] = initial_index;
+			} else {
+				delete this.context[node.index as string];
+			}
+		}
+
+		return for_block_output;
+	}
+
+	private render_switch_block(node: Switch): string {
+		const test = this.eval_node(node.test);
+
+		for (const switch_case of node.cases) {
+			if (switch_case.tests === null) {
+				return this.render_node(switch_case.body);
+			}
+
+			for (const test_expr of switch_case.tests) {
+				const test_value = this.eval_node(test_expr);
+
+				if (test_value === test) {
+					return this.render_node(switch_case.body);
+				}
+			}
+		}
+
+		return "";
+	}
+
+	private render_use_block(node: Use): string {
+		const initial_context: Record<string, unknown> = {};
+
+		for (const pair of node.values) {
+			if (this.context[pair.key]) {
+				initial_context[pair.key] = this.context[pair.key];
+			}
+
+			this.context[pair.key] = this.eval_node(pair.value);
+		}
+
+		const template = this.templates[node.template];
+
+		if (!template) {
+			throw new Error(`Template "${node.template}" not compiled`);
+		}
+
+		for (const block of node.slots) {
+			this.slots.set(block.name, this.render_node(block.body));
+		}
+
+		const inserted = this.render_template(template);
+
+		for (const pair of node.values) {
+			if (initial_context.hasOwnProperty(pair.key)) {
+				this.context[pair.key] = initial_context[pair.key];
+			} else {
+				delete this.context[pair.key];
+			}
+		}
+
+		this.slots.clear();
+
+		return inserted;
+	}
+
+	private render_slot_block(node: Slot): string {
+		const slot_value = this.slots.get(node.name);
+
+		if (slot_value) {
+			return slot_value;
+		}
+
+		return this.render_node(node.body);
+	}
+
+	private render_insert(node: Insert): string {
+		const initial_context: Record<string, unknown> = {};
+
+		for (const pair of node.values) {
+			initial_context[pair.key] = this.context[pair.key];
+			this.context[pair.key] = this.eval_node(pair.value);
+		}
+
+		const template = this.templates[node.template];
+
+		if (!template) {
+			throw new Error(`Template "${node.template}" not compiled`);
+		}
+
+		const inserted = this.render_template(template);
+
+		for (const pair of node.values) {
+			if (initial_context.hasOwnProperty(pair.key)) {
+				this.context[pair.key] = initial_context[pair.key];
+			} else {
+				delete this.context[pair.key];
+			}
+		}
+
+		return inserted;
+	}
+
+	private render_block(node: Block): string {
+		let output = "";
+
+		for (const block of node.body) {
+			output += this.render_node(block);
+		}
+
+		return output;
+	}
+
+	private render_template(node: Template): string {
+		return this.render_block(node.body);
+	}
+
+	private render_body(node: Content): string {
+		const value = this.eval_node(node);
+
+		if (value === null || value === undefined) {
+			return "";
+		}
+
+		return String(value);
+	}
+
+	private eval_node(node: Content): string | number | boolean | null | object {
+		switch(node.type) {
+			case NodeType.identifier: {
+				return this.eval_identifier(node);
+			}
+
+			case NodeType.expression_member: {
+				return this.eval_expression_member(node);
+			}
+
+			case NodeType.expression_binary: {
+				return this.eval_expression_binary(node);
+			}
+
+			case NodeType.expression_conditional: {
+				return this.eval_expression_conditional(node);
+			}
+
+			case NodeType.literal_int:
+			case NodeType.literal_string:
+			case NodeType.literal_boolean:
+			case NodeType.literal_float:
+			case NodeType.literal_null: {
+				return this.eval_literal(node);
+			}
+
+			default: {
+				return null;
+			}
+		}
+	}
+
+	private render_node(node: Template | Content): string {
+		switch(node.type) {
+			case NodeType.template: {
+				return this.render_template(node);
+			}
+
+			case NodeType.text: {
+				return this.render_text(node);
+			}
+
+			case NodeType.comment: {
+				return this.render_comment(node);
+			}
+
+			case NodeType.block: {
+				return this.render_block(node);
+			}
+
+			case NodeType.block_if: {
+				return this.render_if_block(node);
+			}
+
+			case NodeType.block_for: {
+				return this.render_for_block(node);
+			}
+
+			case NodeType.block_switch: {
+				return this.render_switch_block(node);
+			}
+
+			case NodeType.block_use: {
+				return this.render_use_block(node);
+			}
+
+			case NodeType.block_slot: {
+				return this.render_slot_block(node);
+			}
+
+			case NodeType.insert: {
+				return this.render_insert(node);
+			}
+
+			case NodeType.identifier:
+			case NodeType.expression_member:
+			case NodeType.expression_binary:
+			case NodeType.expression_conditional:
+			case NodeType.literal_int:
+			case NodeType.literal_string:
+			case NodeType.literal_boolean:
+			case NodeType.literal_float:
+			case NodeType.literal_null: {
+				return this.render_body(node);
+			}
+
+			default: {
+				return "";
+			}
+		}
+	}
 
 	render() {
-		return this.output;
+		return this.render_node(this.template);
 	}
 }
 
 export class TemplateEngine {
-	private templates: Record<string, any> = {};
-	private imports: Record<string, string[]> = {};
+	private templates: Record<string, Template> = {};
+	private imports:   Record<string, string[]> = {};
+	private debug:     boolean                  = false;
 
-	compile(template_name: string, content: string): Template {
+	compile(template_name: string, content: string): Template | undefined {
 		try {
 			const lexer    = new Lexer(content);
 			const tokens   = lexer.tokenize();
 			const parser   = new Parser(tokens);
 			const template = parser.parse() as Template;
 
-			this.templates[template_name] = template.body;
+			if (this.debug) {
+				for (const token of tokens) {
+					lexer.print_token(token);
+				}
+			}
+
+			this.templates[template_name] = template;
 			this.imports[template_name] = template.imports;
 
-			if (this.check_import_cycles()) {
-				 // @nocheckin
-				throw {
-					message: `Import cycle in template "${template_name}"`,
-					line:    -1,
-					column:  -1
-				} as TemplateError;
+			if (this.debug) {
+				parser.print_node(template);
 			}
 
 			return template;
@@ -2172,195 +2527,80 @@ export class TemplateEngine {
 		}
 	}
 
-	debug(template_name: string, content: string): Template {
+	render(name: string, context: Record<string, unknown> = {}): string {
 		try {
-			const lexer    = new Lexer(content);
-			const tokens   = lexer.tokenize();
-			const parser   = new Parser(tokens);
-			const template = parser.parse() as Template;
+			const template = this.templates[name];
 
-			for (const token of tokens) {
-				lexer.print_token(token);
+			if (!template) {
+				throw new Error(`Template "${name}" not compiled`);
 			}
 
-			this.templates[template_name] = template.body;
-			this.imports[template_name] = template.imports;
+			this.check_import_cycles();
 
-			if (this.check_import_cycles()) {
-				 // @nocheckin
-				throw {
-					message: `Import cycle in template "${template_name}"`,
-					line:    -1,
-					column:  -1
-				} as TemplateError;
-			}
+			const renderer = new Renderer(template!, this.templates, context);
+			const result = renderer.render();
 
-			parser.print_node(template);
-
-			return template;
-		} catch({ message, line, column}: any) {
-			throw new Error(`sfl-template: ${message} (${line}:${column})`);
+			return result;
+		} catch({ message }: any) {
+			throw new Error(`sfl-template: ${message}`);
 		}
 	}
 
-	get(name: string): Template | undefined {
-		return this.templates.get(name);
+	// Simplified render pipeline:
+	// - eval_node(): evaluates expressions to JavaScript values
+	// - render_node(): converts eval results to strings, handles all node types
+	//
+	// Example demonstrating proper falsy value handling:
+	// const engine = new TemplateEngine();
+	// engine.compile("test", "Count: {count}, Active: {active}, Name: {name}");
+	// const result = engine.render("test", {
+	//     count: 0,        // renders as "0"
+	//     active: false,   // renders as "false"
+	//     name: ""         // renders as ""
+	// });
+	// Result: "Count: 0, Active: false, Name: "
+
+	run(template_name: string, content: string, context: Record<string, unknown> = {}): string {
+		this.compile(template_name, content);
+		return this.render(template_name, context);
 	}
 
-	// consider moving inside parser to throw early?
-	check_import_cycles() {
-		const degrees: Record<string, number> = {};
-
-		for (const node in this.imports) {
-			if (!(node in degrees)) {
-				degrees[node] = 0;
+	private check_import_cycles(): void {
+		const visited_templates = new Set<string>();
+		const current_import_path: string[] = [];
+		const in_current_path = new Set<string>();
+		const path_dfs = (template_name: string): void => {
+			if (visited_templates.has(template_name)) {
+				return;
 			}
 
-			for (const dep of this.imports[node]) {
-				if (!(dep in degrees)) {
-					degrees[dep] = 0;
-				}
+			if (in_current_path.has(template_name)) {
+				const cycle_start_index = current_import_path.indexOf(template_name);
+				const cycle = current_import_path.slice(cycle_start_index);
 
-				degrees[dep] += 1;
+				cycle.push(template_name);
+
+				throw new Error(`Found import cycle: ${cycle.join(' → ')}`);
 			}
-		}
 
-		const queue: string[] = [];
+			current_import_path.push(template_name);
+			in_current_path.add(template_name);
 
-		for (const node in degrees) {
-			if (degrees[node] === 0) {
-				queue.push(node);
-			}
-		}
-
-		const result: string[] = [];
-
-		while (queue.length > 0) {
-			const node = queue.shift()!;
-
-			result.push(node);
-
-			if (this.imports[node]) {
-				for (const dep of this.imports[node]) {
-					degrees[dep] -= 1;
-
-					if (degrees[dep] === 0) {
-						queue.push(dep);
-					}
+			if (this.imports[template_name]) {
+				for (const dependency of this.imports[template_name]) {
+					path_dfs(dependency);
 				}
 			}
+
+			current_import_path.pop();
+			in_current_path.delete(template_name);
+			visited_templates.add(template_name);
+		};
+
+		for (const template_name of Object.keys(this.imports)) {
+			if (!visited_templates.has(template_name)) {
+				path_dfs(template_name);
+			}
 		}
-
-		return result.length < Object.keys(degrees).length;
 	}
-
-	render(name: string, context: any): string {
-		const renderer = new Renderer();
-		return renderer.output;
-	}
-}
-
-try {
-	const t = new TemplateEngine();
-
-	t.debug('a.html', `
-		{insert "b.html" (date: "now", other: 2 > 2)}
-		{insert "other.html" (date: "now", other: 2 > 2)}
-	`);
-
-	// t.compile('a.html', `
-	// 	{insert "b.html" (date: "now", other: 2 > 2)}
-	// 	{insert "other.html" (date: "now", other: 2 > 2)}
-	// `);
-
-	// const ast = t.compile("b.html", `
-	// 	{insert "template.html" (date: "now", other: 2 > 2)}
-	// 	{insert "template.html" (date: "then", other: 2 < 2)}
-	//
-	// 	{use "button" (date: "other")}
-	// 		<div>{date}</div>
-	//
-	// 		{into "title"}
-	// 			<span>new title</span>
-	// 		{/into}
-	// 	{/use}
-	//
-	//
-	// 	{use "button"}
-	// 		<div>{date}</div>
-	// 	{/use}
-	//
-	// 	// slots
-	// 	<div>
-	// 		{slot "title"}
-	// 			<div>def</div>
-	// 		{/slot}
-	//
-	// 		<button>
-	// 			{slot}
-	// 				// default slot
-	// 			{/slot}
-	// 		</button>
-	// 	</div>
-	//
-	// 	// expressions
-	// 	<div>{2 + 2}</div>
-	// 	<div>{2 + 2 == 4 ? 'yes' : 'no'}</div>
-	// 	<div>{item}</div>
-	// 	<div>{item.id}</div>
-	// 	<div>{item[var].id}</div>
-	//
-	// 	// loop
-	// 	{for item, index in items}
-	// 		{if condition}
-	// 			<!-- ... -->
-	// 		{else if condition_2}
-	// 			<!-- ... -->
-	// 		{else}
-	// 			<!-- ... -->
-	// 		{/if}
-	// 	{/for}
-	//
-	// 	// if block
-	// 	{if condition}
-	// 		<!-- ... -->
-	// 	{else if condition_2}
-	// 		<!-- ... -->
-	// 	{else}
-	// 		<!-- ... -->
-	// 	{/if}
-	//
-	// 	// switch block
-	// 	{switch var}
-	// 		{case 2 + 2}
-	// 			<!-- ... -->
-	//
-	// 		{case 'test_1', 'test_2'}
-	// 			<!-- ... -->
-	//
-	// 		{default}
-	// 			<!-- ... -->
-	// 	{/switch}
-	//
-	// 	// expression inside css
-	// 	<style>
-	// 		html {
-	// 			color: @{value};
-	// 		}
-	// 	</style>
-	//
-	// 	// expression inside js
-	// 	<script>
-	// 		if (true) {
-	// 			const test = [
-	// 				@{for n in nn}
-	// 					@{n}
-	// 				@{/for}
-	// 			];
-	// 		}
-	// 	</script>
-	// `);
-
-} catch(error: any) {
-	console.error(error.message);
 }
