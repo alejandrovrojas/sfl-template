@@ -1,4 +1,4 @@
-enum TokenType {
+export enum TokenType {
 	eof                    = "eof",
 	comment                = "comment",
 	text                   = "text",
@@ -60,6 +60,8 @@ enum TokenType {
 enum NodeType {
 	template               = "template",
 	text                   = "text",
+	css                    = "css",
+	js                     = "js",
 	comment                = "comment",
 	block                  = "block",
 	block_if               = "block_if",
@@ -70,7 +72,7 @@ enum NodeType {
 	block_for              = "block_for",
 	block_slot             = "block_slot",
 	block_use              = "block_use",
-	insert                 = "insert",
+	block_insert           = "block_insert",
 	literal_null           = "literal_null",
 	literal_int            = "literal_int",
 	literal_float          = "literal_float",
@@ -124,11 +126,9 @@ type Content =
 	| Statement
 	| Expression
 	| Text
+	| CSS
+	| JS
 	| Comment;
-
-type Node =
-	| Content
-	| Template;
 
 type TemplateError = {
 	message:    string;
@@ -166,6 +166,20 @@ type Comment = {
 type Text = {
 	type:       NodeType.text;
 	value:      string;
+}
+
+type CSS = {
+	type:       NodeType.css;
+	static:     boolean;
+	tag:        string;
+	body:       Content[];
+}
+
+type JS = {
+	type:       NodeType.js;
+	static:     boolean;
+	tag:        string;
+	body:       Content[];
 }
 
 type FunctionCall = {
@@ -207,7 +221,7 @@ type For = {
 }
 
 type Insert = {
-	type:       NodeType.insert;
+	type:       NodeType.block_insert;
 	template:   string;
 	values:     KeyValue[];
 }
@@ -281,7 +295,7 @@ type LiteralNull = {
 	value:      null;
 }
 
-class Lexer {
+export class Lexer {
 	input:     string;
 	cursor:    number;
 	line:      number;
@@ -309,7 +323,7 @@ class Lexer {
 	}
 
 	private is_alpha(ch: string): boolean {
-		return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_'; // allow dash?
+		return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_' || ch === '$'; // allow dash?
 	}
 
 	private is_numeric(ch: string): boolean {
@@ -416,41 +430,49 @@ class Lexer {
 				this.type = TokenType.text;
 
 				if (ch === '<') {
-					// <script>
+					// <script> or <script ...>
 					if (
-						this.cursor + 8 <= this.input.length &&
+						this.cursor + 7 <= this.input.length &&
 						this.input[this.cursor + 1] === 's' &&
 						this.input[this.cursor + 2] === 'c' &&
 						this.input[this.cursor + 3] === 'r' &&
 						this.input[this.cursor + 4] === 'i' &&
 						this.input[this.cursor + 5] === 'p' &&
 						this.input[this.cursor + 6] === 't' &&
-						this.input[this.cursor + 7] === '>'
+						(this.input[this.cursor + 7] === '>' || this.is_whitespace(this.input[this.cursor + 7]))
 					) {
 						if (this.cursor > start_cursor) {
 							break;
 						}
 
-						this.type = TokenType.js_start;
-
-						for (let i = 0; i < 8; i++) {
+						for (let i = 0; i < 7; i++) {
 							this.advance_ch();
 						}
 
+						while (this.cursor < this.input.length && this.current_ch() !== '>') {
+							this.advance_ch();
+						}
+
+						// advance past '>'
+						if (this.current_ch() === '>') {
+							this.advance_ch();
+						}
+
+						this.type = TokenType.js_start;
 						this.mode = LexerMode.js;
 
 						break;
 					}
 
-					// <style>
+					// <style> or <style ...>
 					if (
-						this.cursor + 7 <= this.input.length &&
+						this.cursor + 6 <= this.input.length &&
 						this.input[this.cursor + 1] === 's' &&
 						this.input[this.cursor + 2] === 't' &&
 						this.input[this.cursor + 3] === 'y' &&
 						this.input[this.cursor + 4] === 'l' &&
 						this.input[this.cursor + 5] === 'e' &&
-						this.input[this.cursor + 6] === '>'
+						(this.input[this.cursor + 6] === '>' || this.is_whitespace(this.input[this.cursor + 6]))
 					) {
 						if (this.cursor > start_cursor) {
 							break;
@@ -458,7 +480,15 @@ class Lexer {
 
 						this.type = TokenType.css_start;
 
-						for (let i = 0; i < 7; i++) {
+						for (let i = 0; i < 6; i++) {
+							this.advance_ch();
+						}
+
+						while (this.cursor < this.input.length && this.current_ch() !== '>') {
+							this.advance_ch();
+						}
+
+						if (this.current_ch() === '>') {
 							this.advance_ch();
 						}
 
@@ -1204,9 +1234,12 @@ class Lexer {
 	}
 }
 
-class Parser {
+export class Parser {
 	tokens: Token[];
 	cursor: number;
+	imports: string[]  = [];
+	css:     string = "";
+	js:      string = "";
 
 	constructor(tokens: Token[]) {
 		this.tokens = tokens;
@@ -1292,7 +1325,7 @@ class Parser {
 				}
 			}
 
-			nodes.push(this.parse_body());
+			nodes.push(this.parse_content());
 		}
 	}
 
@@ -1302,6 +1335,86 @@ class Parser {
 		return {
 			type:  NodeType.text,
 			value: token.value,
+		};
+	}
+
+	private parse_css(): CSS {
+		const tag = this.advance_token();
+
+		let is_static = true;
+		const body_nodes: Content[] = [];
+
+		while (true) {
+			const next = this.peek_token();
+
+			if (next && next.type === TokenType.css_end) {
+				const node = this.parse_content();
+
+				is_static = is_static && node.type === NodeType.text;
+				body_nodes.push(node);
+				
+				break;
+			}
+
+			const node = this.parse_content();
+
+			is_static = is_static && node.type === NodeType.text;
+			body_nodes.push(node);
+		}
+
+		this.expect_token(TokenType.css_end);
+
+		if (is_static) {
+			for (const node of body_nodes) {
+				this.css += (node as Text).value;
+			}
+		}
+
+		return {
+			type:   NodeType.css,
+			tag:    tag.value,
+			static: is_static,
+			body:   body_nodes
+		};
+	}
+
+	private parse_js(): JS {
+		const tag = this.advance_token();
+
+		let is_static = true;
+		const body_nodes: Content[] = [];
+
+		while (true) {
+			const next = this.peek_token();
+
+			if (next && next.type === TokenType.js_end) {
+				const node = this.parse_content();
+
+				is_static = is_static && node.type === NodeType.text;
+				body_nodes.push(node);
+
+				break;
+			}
+
+			const node = this.parse_content();
+
+			is_static = is_static && node.type === NodeType.text;
+			body_nodes.push(node);
+		}
+
+		this.expect_token(TokenType.js_end);
+
+		if (is_static) {
+			for (const node of body_nodes) {
+				this.js += (node as Text).value;
+			}
+		}
+
+		return {
+			type:   NodeType.js,
+			tag:    tag.value,
+			static: is_static,
+			body:   body_nodes
 		};
 	}
 
@@ -1473,6 +1586,8 @@ class Parser {
 
 		const template = this.expect_token(TokenType.string);
 
+		this.imports.push(template.value);
+
 		let values: KeyValue[] = [];
 
 		if (this.current_token().type == TokenType.l_parenthesis) {
@@ -1484,7 +1599,7 @@ class Parser {
 		this.expect_token(TokenType.expr_end);
 
 		return {
-			type:     NodeType.insert,
+			type:     NodeType.block_insert,
 			template: template.value,
 			values:   values
 		}
@@ -1494,6 +1609,8 @@ class Parser {
 		this.advance_token();
 
 		const template = this.expect_token(TokenType.string);
+
+		this.imports.push(template.value);
 
 		let values: KeyValue[] = [];
 
@@ -1956,7 +2073,7 @@ class Parser {
 		return pairs;
 	}
 
-	private parse_body(): Content {
+	private parse_content(): Content {
 		const current = this.current_token();
 
 		switch (current.type) {
@@ -1964,32 +2081,18 @@ class Parser {
 				return this.parse_comment();
 			}
 
-			case TokenType.text: {
-				return this.parse_text();
-			}
-
-			case TokenType.text_css: {
-				return this.parse_text();
-			}
-
+			case TokenType.text:
+			case TokenType.text_css:
 			case TokenType.text_js: {
 				return this.parse_text();
 			}
 
 			case TokenType.css_start: {
-				return this.parse_text();
-			}
-
-			case TokenType.css_end: {
-				return this.parse_text();
+				return this.parse_css();
 			}
 
 			case TokenType.js_start: {
-				return this.parse_text();
-			}
-
-			case TokenType.js_end: {
-				return this.parse_text();
+				return this.parse_js();
 			}
 
 			case TokenType.expr_start: {
@@ -2054,28 +2157,28 @@ class Parser {
 		}
 	}
 
-	parse(): Template {
-		const body: Content[] = [];
-		const imports: string[] = [];
+	parse(): any {
+		const nodes: Content[] = [];
 
 		while (!this.is_current_token(TokenType.eof)) {
-			const node = this.parse_body();
-
-			if (node.type === NodeType.insert || node.type === NodeType.block_use) {
-				imports.push(node.template);
-			}
-
-			body.push(node);
+			nodes.push(this.parse_content());
 		}
 
-		return {
-			type: NodeType.template,
-			imports: imports,
-			body: {
-				type: NodeType.block,
-				body: body
-			}
+		return { 
+			imports: this.imports,
+			js:      this.js,
+			css:     this.css,
+			nodes:   nodes
 		};
+
+		// return {
+		// 	type: NodeType.template,
+		// 	imports: imports,
+		// 	body: {
+		// 		type: NodeType.block,
+		// 		body: body
+		// 	}
+		// };
 	}
 
 	print_node(node: Template | Content): void {
@@ -2083,11 +2186,18 @@ class Parser {
 	}
 }
 
-class Renderer {
+export class Renderer {
 	private template:  Template;
-	private templates: Record<string, Template>    = {};
-	private context:   Record<string, unknown>     = {};
-	private slots:     Map<string | null, string> = new Map();
+	private templates: Record<string, Template>                      = {};
+	private context:   Record<string, unknown>                       = {};
+	private slots:     Map<string | null, Block>                     = new Map();
+	private mode:      'html' | 'css' | 'js'                         = 'html';
+	public  result:    Record<'html' | 'css' | 'js' | 'all', string> = {
+		html: "",
+		css:  "",
+		js:   "",
+		all:  "",
+	};
 
 	constructor(template: Template, templates: Record<string, Template>, context: Record<string, unknown>) {
 		this.template  = template;
@@ -2095,21 +2205,43 @@ class Renderer {
 		this.context   = context;
 	}
 
-	private eval_literal(node: Literal): string | number | boolean | null | object {
+	private eval_literal(node: Literal): unknown {
 		return node.value;
 	}
 
-	private eval_identifier(node: Identifier): string | number | boolean | null | object {
+	private eval_identifier(node: Identifier): unknown {
 		return this.context[node.name] ?? null;
 	}
 
-	private eval_expression_member(node: ExpressionMember): string | number | boolean | null | object {
+	private eval_function_call(node: FunctionCall): unknown {
+		const identifier = this.eval_node(node.identifier);
+		const args: any = [];
+
+		for (const arg of node.args) {
+			args.push(this.eval_node(arg));
+		}
+
+		if (typeof identifier !== 'function') {
+			return null;
+		}
+
+		if (!identifier) {
+			return null;
+		}
+
+		return identifier(...args);
+	}
+
+	private eval_expression_member(node: ExpressionMember): unknown {
 		const object = this.eval_node(node.object);
-		const property = this.eval_node(node.property);
 
 		if (object === null || object === undefined) {
 			return null;
 		}
+
+		const property = (node.property.type === NodeType.identifier)
+			? node.property.name
+			: this.eval_node(node.property);
 
 		if (typeof property !== "string" && typeof property !== "number") {
 			return null;
@@ -2122,7 +2254,7 @@ class Renderer {
 		}
 	}
 
-	private eval_expression_binary(node: ExpressionBinary): string | number | boolean | null | object {
+	private eval_expression_binary(node: ExpressionBinary): unknown {
 		const left = this.eval_node(node.left);
 		const right = this.eval_node(node.right);
 
@@ -2158,7 +2290,7 @@ class Renderer {
 		}
 	}
 
-	private eval_expression_conditional(node: ExpressionConditional): string | number | boolean | null | object {
+	private eval_expression_conditional(node: ExpressionConditional): unknown {
 		if (this.eval_node(node.condition)) {
 			return this.eval_node(node.consequent);
 		} else {
@@ -2166,243 +2298,14 @@ class Renderer {
 		}
 	}
 
-	private render_comment(_: Comment): string {
-		return "";
-	}
-
-	private render_text(node: Text): string {
-		return node.value;
-	}
-
-	private render_if_block(node: If): string {
-		if (this.eval_node(node.condition)) {
-			return this.render_node(node.consequent);
-		}
-
-		if (node.alternate) {
-			return this.render_node(node.alternate);
-		}
-
-		return "";
-	}
-
-	private render_for_block(node: For): string {
-		const iterable = this.eval_node(node.iterable);
-
-		const initial_iterator = this.context[node.iterator];
-		const initial_index   = this.context[node.index as string];
-
-		let for_block_output = "";
-
-		try {
-			if (iterable === null || iterable === undefined) {
-				return "";
-			}
-
-			if (typeof iterable === 'string') {
-				const loop_string = iterable;
-
-				if (loop_string.length === 0) {
-					return "";
-				}
-
-				for (let i = 0; i < loop_string.length; i++) {
-					this.context[node.iterator] = loop_string[i];
-
-					if (node.index) {
-						this.context[node.index as string] = i;
-					}
-
-					for_block_output += this.render_node(node.body);
-				}
-			} else if (Array.isArray(iterable)) {
-				const loop_array = iterable;
-
-				if (loop_array.length === 0) {
-					return "";
-				}
-
-				for (let i = 0; i < loop_array.length; i++) {
-					this.context[node.iterator] = loop_array[i];
-
-					if (node.index) {
-						this.context[node.index as string] = i;
-					}
-
-					for_block_output += this.render_node(node.body);
-				}
-			} else if (typeof iterable === 'number') {
-				const loop_number = iterable;
-
-				if (loop_number <= 0) {
-					return "";
-				}
-
-				for (let i = 0; i < loop_number; i++) {
-					this.context[node.iterator] = i;
-
-					if (node.index) {
-						this.context[node.index as string] = i;
-					}
-
-					for_block_output += this.render_node(node.body);
-				}
-			} else if (typeof iterable === 'object') {
-				const loop_object = iterable as any;
-				const loop_object_keys = Object.keys(loop_object);
-
-				for (let i = 0; i < loop_object_keys.length; i++) {
-					const key = loop_object_keys[i];
-
-					this.context[node.iterator] = loop_object[key];
-
-					if (node.index) {
-						this.context[node.index as string] = key;
-					}
-
-					for_block_output += this.render_node(node.body);
-				}
-			} else {
-				return "";
-			}
-		} finally {
-			if (initial_iterator) {
-				this.context[node.iterator] = initial_iterator;
-			} else {
-				delete this.context[node.iterator];
-			}
-
-			if (initial_index) {
-				this.context[node.index as string] = initial_index;
-			} else {
-				delete this.context[node.index as string];
-			}
-		}
-
-		return for_block_output;
-	}
-
-	private render_switch_block(node: Switch): string {
-		const test = this.eval_node(node.test);
-
-		for (const switch_case of node.cases) {
-			if (switch_case.tests === null) {
-				return this.render_node(switch_case.body);
-			}
-
-			for (const test_expr of switch_case.tests) {
-				const test_value = this.eval_node(test_expr);
-
-				if (test_value === test) {
-					return this.render_node(switch_case.body);
-				}
-			}
-		}
-
-		return "";
-	}
-
-	private render_use_block(node: Use): string {
-		const initial_context: Record<string, unknown> = {};
-
-		for (const pair of node.values) {
-			if (this.context[pair.key]) {
-				initial_context[pair.key] = this.context[pair.key];
-			}
-
-			this.context[pair.key] = this.eval_node(pair.value);
-		}
-
-		const template = this.templates[node.template];
-
-		if (!template) {
-			throw new Error(`Template "${node.template}" not compiled`);
-		}
-
-		for (const block of node.slots) {
-			this.slots.set(block.name, this.render_node(block.body));
-		}
-
-		const inserted = this.render_template(template);
-
-		for (const pair of node.values) {
-			if (initial_context.hasOwnProperty(pair.key)) {
-				this.context[pair.key] = initial_context[pair.key];
-			} else {
-				delete this.context[pair.key];
-			}
-		}
-
-		this.slots.clear();
-
-		return inserted;
-	}
-
-	private render_slot_block(node: Slot): string {
-		const slot_value = this.slots.get(node.name);
-
-		if (slot_value) {
-			return slot_value;
-		}
-
-		return this.render_node(node.body);
-	}
-
-	private render_insert(node: Insert): string {
-		const initial_context: Record<string, unknown> = {};
-
-		for (const pair of node.values) {
-			initial_context[pair.key] = this.context[pair.key];
-			this.context[pair.key] = this.eval_node(pair.value);
-		}
-
-		const template = this.templates[node.template];
-
-		if (!template) {
-			throw new Error(`Template "${node.template}" not compiled`);
-		}
-
-		const inserted = this.render_template(template);
-
-		for (const pair of node.values) {
-			if (initial_context.hasOwnProperty(pair.key)) {
-				this.context[pair.key] = initial_context[pair.key];
-			} else {
-				delete this.context[pair.key];
-			}
-		}
-
-		return inserted;
-	}
-
-	private render_block(node: Block): string {
-		let output = "";
-
-		for (const block of node.body) {
-			output += this.render_node(block);
-		}
-
-		return output;
-	}
-
-	private render_template(node: Template): string {
-		return this.render_block(node.body);
-	}
-
-	private render_body(node: Content): string {
-		const value = this.eval_node(node);
-
-		if (value === null || value === undefined) {
-			return "";
-		}
-
-		return String(value);
-	}
-
-	private eval_node(node: Content): string | number | boolean | null | object {
+	private eval_node(node: Content): unknown {
 		switch(node.type) {
 			case NodeType.identifier: {
 				return this.eval_identifier(node);
+			}
+
+			case NodeType.function_call: {
+				return this.eval_function_call(node);
 			}
 
 			case NodeType.expression_member: {
@@ -2426,54 +2329,324 @@ class Renderer {
 			}
 
 			default: {
+				console.log('NI %s', node.type);
 				return null;
 			}
 		}
 	}
 
-	private render_node(node: Template | Content): string {
+	private render_comment(_: Comment): void {
+		// no output
+	}
+
+	private render_html_css_start(node: HTMLCSSStart): void {
+		this.mode = 'css';
+		this.result.all += node.value;
+	}
+
+	private render_html_css_end(node: HTMLCSSEnd): void {
+		this.mode = 'html';
+		this.result.all += node.value;
+	}
+
+	private render_html_js_start(node: HTMLJSStart): void {
+		this.mode = 'js';
+		this.result.all += node.value;
+	}
+
+	private render_html_js_end(node: HTMLJSEnd): void {
+		this.mode = 'html';
+		this.result.all += node.value;
+	}
+
+	private render_text(node: Text): void {
+		this.result.html += node.value;
+		this.result.all += node.value;
+	}
+
+	private render_css(node: CSS): void {
+		this.result.css += node.value;
+		this.result.all += node.value;
+	}
+
+	private render_js(node: JS): void {
+		this.result.js += node.value;
+		this.result.all += node.value;
+	}
+
+	private render_if_block(node: If): void {
+		if (this.eval_node(node.condition)) {
+			this.render_node(node.consequent);
+		} else if (node.alternate) {
+			this.render_node(node.alternate);
+		}
+	}
+
+	private render_for_block(node: For): void {
+		const iterable = this.eval_node(node.iterable);
+
+		const initial_iterator = this.context[node.iterator];
+		const initial_index    = this.context[node.index as string];
+
+		try {
+			if (iterable === null || iterable === undefined) {
+				return;
+			}
+
+			if (typeof iterable === 'string') {
+				const loop_string = iterable;
+
+				if (loop_string.length === 0) {
+					return;
+				}
+
+				for (let i = 0; i < loop_string.length; i++) {
+					this.context[node.iterator] = loop_string[i];
+
+					if (node.index) {
+						this.context[node.index as string] = i;
+					}
+
+					this.render_node(node.body);
+				}
+			} else if (Array.isArray(iterable)) {
+				const loop_array = iterable;
+
+				if (loop_array.length === 0) {
+					return;
+				}
+
+				for (let i = 0; i < loop_array.length; i++) {
+					this.context[node.iterator] = loop_array[i];
+
+					if (node.index) {
+						this.context[node.index as string] = i;
+					}
+
+					this.render_node(node.body);
+				}
+			} else if (typeof iterable === 'number') {
+				const loop_number = iterable;
+
+				if (loop_number <= 0) {
+					return;
+				}
+
+				for (let i = 0; i < loop_number; i++) {
+					this.context[node.iterator] = i;
+
+					if (node.index) {
+						this.context[node.index as string] = i;
+					}
+
+					this.render_node(node.body);
+				}
+			} else if (typeof iterable === 'object') {
+				const loop_object = iterable as any;
+				const loop_object_keys = Object.keys(loop_object);
+
+				for (let i = 0; i < loop_object_keys.length; i++) {
+					const key = loop_object_keys[i];
+
+					this.context[node.iterator] = loop_object[key];
+
+					if (node.index) {
+						this.context[node.index as string] = key;
+					}
+
+					this.render_node(node.body);
+				}
+			}
+		} finally {
+			if (initial_iterator) {
+				this.context[node.iterator] = initial_iterator;
+			} else {
+				delete this.context[node.iterator];
+			}
+
+			if (initial_index) {
+				this.context[node.index as string] = initial_index;
+			} else {
+				delete this.context[node.index as string];
+			}
+		}
+	}
+
+	private render_switch_block(node: Switch): void {
+		const test = this.eval_node(node.test);
+
+		for (const switch_case of node.cases) {
+			if (switch_case.tests === null) {
+				this.render_node(switch_case.body);
+				return;
+			}
+
+			for (const test_expr of switch_case.tests) {
+				const test_value = this.eval_node(test_expr);
+
+				if (test_value === test) {
+					this.render_node(switch_case.body);
+					return;
+				}
+			}
+		}
+	}
+
+	private render_use_block(node: Use): void {
+		const initial_context: Record<string, unknown> = {};
+
+		for (const pair of node.values) {
+			if (this.context[pair.key]) {
+				initial_context[pair.key] = this.context[pair.key];
+			}
+
+			this.context[pair.key] = this.eval_node(pair.value);
+		}
+
+		const template = this.templates[node.template];
+
+		if (!template) {
+			throw new Error(`Template "${node.template}" not compiled`);
+		}
+
+		for (const block of node.slots) {
+			this.slots.set(block.name, block.body);
+		}
+
+		this.render_template(template);
+
+		for (const pair of node.values) {
+			if (initial_context.hasOwnProperty(pair.key)) {
+				this.context[pair.key] = initial_context[pair.key];
+			} else {
+				delete this.context[pair.key];
+			}
+		}
+
+		this.slots.clear();
+	}
+
+	private render_slot_block(node: Slot): void {
+		const slot_value = this.slots.get(node.name);
+
+		if (slot_value) {
+			this.render_node(slot_value);
+		} else {
+			this.render_node(node.body);
+		}
+	}
+
+	private render_insert(node: Insert): void {
+		const initial_context: Record<string, unknown> = {};
+
+		for (const pair of node.values) {
+			initial_context[pair.key] = this.context[pair.key];
+			this.context[pair.key] = this.eval_node(pair.value);
+		}
+
+		const template = this.templates[node.template];
+
+		if (!template) {
+			throw new Error(`Template "${node.template}" not compiled`);
+		}
+
+		this.render_template(template);
+
+		for (const pair of node.values) {
+			if (initial_context.hasOwnProperty(pair.key)) {
+				this.context[pair.key] = initial_context[pair.key];
+			} else {
+				delete this.context[pair.key];
+			}
+		}
+	}
+
+	private render_block(node: Block): void {
+		for (const block of node.body) {
+			this.render_node(block);
+		}
+	}
+
+	private render_template(node: Template): void {
+		this.render_node(node.body);
+	}
+
+	private render_content(node: Content): void {
+		const value = this.eval_node(node);
+
+		if (value === null || value === undefined) {
+			return;
+		}
+
+		const output = String(value);
+		this.result[this.mode] += output;
+		this.result.all += output;
+	}
+
+	private render_node(node: Template | Content): void {
 		switch(node.type) {
 			case NodeType.template: {
-				return this.render_template(node);
+				this.render_template(node);
+				break;
 			}
 
 			case NodeType.text: {
-				return this.render_text(node);
+				this.render_text(node);
+				break;
+			}
+
+			case NodeType.css: {
+				this.render_css(node);
+				break;
+			}
+
+			case NodeType.js: {
+				this.render_js(node);
+				break;
 			}
 
 			case NodeType.comment: {
-				return this.render_comment(node);
+				this.render_comment(node);
+				break;
 			}
 
 			case NodeType.block: {
-				return this.render_block(node);
+				this.render_block(node);
+				break;
 			}
 
 			case NodeType.block_if: {
-				return this.render_if_block(node);
+				this.render_if_block(node);
+				break;
 			}
 
 			case NodeType.block_for: {
-				return this.render_for_block(node);
+				this.render_for_block(node);
+				break;
 			}
 
 			case NodeType.block_switch: {
-				return this.render_switch_block(node);
+				this.render_switch_block(node);
+				break;
 			}
 
 			case NodeType.block_use: {
-				return this.render_use_block(node);
+				this.render_use_block(node);
+				break;
 			}
 
 			case NodeType.block_slot: {
-				return this.render_slot_block(node);
+				this.render_slot_block(node);
+				break;
 			}
 
-			case NodeType.insert: {
-				return this.render_insert(node);
+			case NodeType.block_insert: {
+				this.render_insert(node);
+				break;
 			}
 
 			case NodeType.identifier:
+			case NodeType.function_call:
 			case NodeType.expression_member:
 			case NodeType.expression_binary:
 			case NodeType.expression_conditional:
@@ -2482,37 +2655,40 @@ class Renderer {
 			case NodeType.literal_boolean:
 			case NodeType.literal_float:
 			case NodeType.literal_null: {
-				return this.render_body(node);
+				this.render_content(node);
+				break;
 			}
 
 			default: {
-				return "";
+				console.log('NI %s', node.type);
 			}
 		}
 	}
 
 	render() {
-		return this.render_node(this.template);
+		this.render_node(this.template);
+		return this.result;
 	}
 }
 
 export class TemplateEngine {
 	private templates: Record<string, Template> = {};
 	private imports:   Record<string, string[]> = {};
-	private debug:     boolean                  = false;
+	private debug:     boolean                  = true;
 
 	compile(template_name: string, content: string): Template | undefined {
 		try {
 			const lexer    = new Lexer(content);
 			const tokens   = lexer.tokenize();
-			const parser   = new Parser(tokens);
-			const template = parser.parse() as Template;
 
 			if (this.debug) {
 				for (const token of tokens) {
 					lexer.print_token(token);
 				}
 			}
+
+			const parser   = new Parser(tokens);
+			const template = parser.parse() as any;
 
 			this.templates[template_name] = template;
 			this.imports[template_name] = template.imports;
@@ -2527,7 +2703,9 @@ export class TemplateEngine {
 		}
 	}
 
-	render(name: string, context: Record<string, unknown> = {}): string {
+
+
+	render(name: string, context: Record<string, unknown> = {}): Record<'html' | 'css' | 'js' | 'all', string> {
 		try {
 			const template = this.templates[name];
 
@@ -2546,21 +2724,7 @@ export class TemplateEngine {
 		}
 	}
 
-	// Simplified render pipeline:
-	// - eval_node(): evaluates expressions to JavaScript values
-	// - render_node(): converts eval results to strings, handles all node types
-	//
-	// Example demonstrating proper falsy value handling:
-	// const engine = new TemplateEngine();
-	// engine.compile("test", "Count: {count}, Active: {active}, Name: {name}");
-	// const result = engine.render("test", {
-	//     count: 0,        // renders as "0"
-	//     active: false,   // renders as "false"
-	//     name: ""         // renders as ""
-	// });
-	// Result: "Count: 0, Active: false, Name: "
-
-	run(template_name: string, content: string, context: Record<string, unknown> = {}): string {
+	run(template_name: string, content: string, context: Record<string, unknown> = {}): Record<'html' | 'css' | 'js' | 'all', string> {
 		this.compile(template_name, content);
 		return this.render(template_name, context);
 	}
