@@ -1,3 +1,153 @@
+// sfl-template
+// 0.1.0
+//
+// depdendency-free single-file library for rendering HTML-like templates.
+// the syntax resembles most mustache-based template engines. all basic logic
+// blocks supported. the parser allows out-of-order imports and throws
+// on import cycles. imports paths and inline <style> or <script> content
+// is extracted and returned separately during parsing.
+//
+//
+// USAGE
+//     import { TemplateEngine } from './template.ts';
+//
+//     const t = new TemplateEngine();
+//
+//     t.compile('first_template', `
+//         {insert 'button' (title: "test")}
+//     `)
+//
+//     t.compile('button', `
+//         <button>{title}</button>
+//     `)
+//
+//     t.render('first_template');
+//
+//
+// SYNTAX
+//     // import
+//     {insert "template.html" (date: "now", other: 2 > 2)}
+//
+//     // import + slot
+//     {use "button" (item: "other")}
+//         default slot
+//
+//         {slot "title"}
+//             {item}
+//         {/slot}
+//     {/use}
+//
+//     // slots
+//     <div>
+//         {slot "title"}
+//             <div>default title</div>
+//         {/slot}
+//
+//         <button>
+//             {slot}
+//                 // default slot
+//             {/slot}
+//         </button>
+//     </div>
+//
+//     // expressions
+//     <div>{2 + 2}</div>
+//     <div>{a > b && c < d || e >= f}</div>
+//     <div>{2 + 2 == 4 ? 'yes' : 'no'}</div>
+//     <div>{item}</div>
+//     <div>{item.id}</div>
+//     <div>{item[var].id}</div>
+//
+//     // for block
+//     {for n, i in 10}
+//         {n}
+//     {/for}
+//
+//     {for ch, i in "hello"}
+//         {ch}
+//     {/for}
+//
+//     {for k, v in obj.like}
+//         {k}: {v}
+//     {/for}
+//
+//     {for item, index in items}
+//         {if condition}
+//             //...
+//         {else if condition_2}
+//             //...
+//         {else}
+//             //...
+//         {/if}
+//     {/for}
+//
+//     // if block
+//     {if condition}
+//         //...
+//     {else if condition_2 || condition_3}
+//         //...
+//     {else}
+//         //...
+//     {/if}
+//
+//     // switch block
+//     {switch var}
+//         {case 2 + 2}
+//             //...
+//
+//         {case 'test_1', 'test_2'}
+//             //...
+//
+//         {default}
+//             //...
+//     {/switch}
+//
+//     // expression inside css
+//     <style>
+//         html {
+//             color: @{value};
+//         }
+//     </style>
+//
+//     // expression inside js
+//     <script>
+//         if (true) {
+//             const test = [
+//                 @{for n in nn}
+//                     @{n}
+//                 @{/for}
+//             ];
+//         }
+//     </script>
+//
+//
+// OUTPUT
+//     t.compile('test', `
+//         {insert "misc/button.html"}
+//
+//         <style>
+//             .css { color: red; }
+//         </style>
+//
+//         <script>
+//             const test = 20;
+//         </script>
+//
+//         <script>
+//             const ignored = @{2 + 2};
+//         </script>
+//
+//         <div></div>
+//     `);
+//
+//     Template {
+//     	    imports:  string[]  =  [ "misc/button.html" ],
+//     	    js:       string;   =  ".css { color: red; }",
+//     	    css:      string;   =  "const test = 20;",
+//     	    ast:      Block;    =  { ... }
+//     }
+
+
 export enum TokenType {
 	eof                    = "eof",
 	comment                = "comment",
@@ -6,10 +156,11 @@ export enum TokenType {
 	text_js                = "text_js",
 	expr_start             = "expr_start",
 	expr_end               = "expr_end",
-	js_start               = "js_start",
-	js_end                 = "js_end",
-	css_start              = "css_start",
-	css_end                = "css_end",
+	tag_start_js           = "tag_start_js",
+	tag_start_css          = "tag_start_css",
+	tag_start_end          = "tag_start_end",
+	tag_end_js             = "tag_end_js",
+	tag_end_css            = "tag_end_css",
 	for_start              = "for_start",
 	for_end                = "for_end",
 	for_in                 = "for_in",
@@ -58,6 +209,7 @@ export enum TokenType {
 }
 
 enum NodeType {
+	skip                   = "skip",
 	template               = "template",
 	text                   = "text",
 	css                    = "css",
@@ -93,6 +245,7 @@ enum LexerMode {
 	text                   = "text",
 	js                     = "js",
 	css                    = "css",
+	tag                    = "tag",
 	expr                   = "expr"
 }
 
@@ -128,13 +281,8 @@ type Content =
 	| Text
 	| CSS
 	| JS
+	| Skip
 	| Comment;
-
-type TemplateError = {
-	message:    string;
-	line:       number;
-	column:     number;
-}
 
 type Token = {
 	type:       TokenType;
@@ -147,10 +295,8 @@ type TokenPosition = {
 	column:     number;
 }
 
-type Template = {
-	type:       NodeType.template;
-	imports:    string[]
-	body:       Block;
+type Skip = {
+	type:       NodeType.skip;
 }
 
 type Block = {
@@ -171,16 +317,16 @@ type Text = {
 type CSS = {
 	type:       NodeType.css;
 	static:     boolean;
-	tag:        string;
-	body:       Content[];
+	attributes: Block;
+	body:       Block;
 }
 
 type JS = {
 	type:       NodeType.js;
 	static:     boolean;
-	tag:        string;
-	body:       Content[];
-}
+	attributes: Block;
+	body:       Block;
+};
 
 type FunctionCall = {
 	type:       NodeType.function_call;
@@ -295,23 +441,38 @@ type LiteralNull = {
 	value:      null;
 }
 
+export type Template = {
+	imports:    string[]
+	js:         string;
+	css:        string;
+	ast:        Block;
+}
+
+export type TemplateEngineOptions = {
+	debug:       boolean;
+	skip_static: boolean;
+	context:     Record<string, unknown>;
+}
+
 export class Lexer {
-	input:     string;
-	cursor:    number;
-	line:      number;
-	column:    number;
-	type:      TokenType;
-	mode:      LexerMode;
-	prev_mode: LexerMode;
+	input:         string;
+	cursor:        number;
+	line:          number;
+	column:        number;
+	type:          TokenType;
+	mode:          LexerMode;
+	prev_mode:     LexerMode;
+	tag_prev_mode: LexerMode;
 
 	constructor(input: string) {
-		this.input     = input;
-		this.cursor    = 0;
-		this.line      = 1;
-		this.column    = 1;
-		this.type      = TokenType.text;
-		this.mode      = LexerMode.text;
-		this.prev_mode = LexerMode.text;
+		this.input         = input;
+		this.cursor        = 0;
+		this.line          = 1;
+		this.column        = 1;
+		this.type          = TokenType.eof;
+		this.mode          = LexerMode.text;
+		this.prev_mode     = LexerMode.text;
+		this.tag_prev_mode = LexerMode.text;
 	}
 
 	private is_whitespace(ch: string): boolean {
@@ -319,7 +480,7 @@ export class Lexer {
 	}
 
 	private is_keyword_boundary(ch: string): boolean {
-		return this.is_whitespace(ch) || ch === '}' || ch == ']'; // kind of flaky
+		return this.is_whitespace(ch) || ch === '}' || ch == ']'; // kind of flaky?
 	}
 
 	private is_alpha(ch: string): boolean {
@@ -449,17 +610,9 @@ export class Lexer {
 							this.advance_ch();
 						}
 
-						while (this.cursor < this.input.length && this.current_ch() !== '>') {
-							this.advance_ch();
-						}
-
-						// advance past '>'
-						if (this.current_ch() === '>') {
-							this.advance_ch();
-						}
-
-						this.type = TokenType.js_start;
-						this.mode = LexerMode.js;
+						this.type = TokenType.tag_start_js;
+						this.mode = LexerMode.tag;
+						this.tag_prev_mode = LexerMode.js;
 
 						break;
 					}
@@ -478,21 +631,13 @@ export class Lexer {
 							break;
 						}
 
-						this.type = TokenType.css_start;
-
 						for (let i = 0; i < 6; i++) {
 							this.advance_ch();
 						}
 
-						while (this.cursor < this.input.length && this.current_ch() !== '>') {
-							this.advance_ch();
-						}
-
-						if (this.current_ch() === '>') {
-							this.advance_ch();
-						}
-
-						this.mode = LexerMode.css;
+						this.type = TokenType.tag_start_css;
+						this.mode = LexerMode.tag;
+						this.tag_prev_mode = LexerMode.css;
 
 						break;
 					}
@@ -515,6 +660,7 @@ export class Lexer {
 
 				// </style>
 				if (
+					ch === '<' &&
 					this.cursor + 8 <= this.input.length &&
 					this.input[this.cursor + 1] === '/' &&
 					this.input[this.cursor + 2] === 's' &&
@@ -528,7 +674,7 @@ export class Lexer {
 						break;
 					}
 
-					this.type = TokenType.css_end;
+					this.type = TokenType.tag_end_css;
 
 					for (let i = 0; i < 8; i++) {
 						this.advance_ch();
@@ -559,6 +705,7 @@ export class Lexer {
 
 				// </script>
 				if (
+					ch === '<' &&
 					this.cursor + 9 <= this.input.length &&
 					this.input[this.cursor + 1] === '/' &&
 					this.input[this.cursor + 2] === 's' &&
@@ -573,7 +720,7 @@ export class Lexer {
 						break;
 					}
 
-					this.type = TokenType.js_end;
+					this.type = TokenType.tag_end_js;
 
 					for (let i = 0; i < 9; i++) {
 						this.advance_ch();
@@ -596,6 +743,34 @@ export class Lexer {
 
 						break;
 					}
+				}
+			}
+
+			if (this.mode === LexerMode.tag) {
+				this.type = TokenType.text;
+
+				if (ch === '>') {
+					if (this.cursor > start_cursor) {
+						break;
+					}
+
+					this.advance_ch();
+
+					this.type = TokenType.tag_start_end;
+					this.mode = this.tag_prev_mode;
+
+					return this.create_token(start_cursor, start_position);
+				}
+
+				if (ch === '{') {
+					if (this.cursor > start_cursor) {
+						break;
+					}
+
+					this.prev_mode = this.mode;
+					this.mode = LexerMode.expr;
+
+					break;
 				}
 			}
 
@@ -1193,11 +1368,8 @@ export class Lexer {
 							return this.create_token(start_cursor, start_position);
 						}
 
-						throw {
-							message: `Misplaced character "${ch}"`,
-							line:    start_position.line,
-							column:  start_position.column
-						} as TemplateError;
+						const { line, column } = start_position;
+						throw new Error(`Misplaced character ${ch} (${line}:${column})`);
 					}
 				}
 			}
@@ -1205,7 +1377,7 @@ export class Lexer {
 			this.advance_ch();
 		}
 
-		let token_value = this.input.slice(start_cursor, this.cursor);
+		const token_value = this.input.slice(start_cursor, this.cursor);
 
 		if (token_value.length === 0) {
 			return this.tokenize_lexeme();
@@ -1235,15 +1407,24 @@ export class Lexer {
 }
 
 export class Parser {
-	tokens: Token[];
-	cursor: number;
-	imports: string[]  = [];
-	css:     string = "";
-	js:      string = "";
+	tokens:  Token[];
+	cursor:  number;
+	imports: string[]              = []; // collected imports of this template
+	css:     string                = ""; // collected static css of this template
+	js:      string                = ""; // collected static js of this template
+	options: TemplateEngineOptions = {
+		debug:       false,
+		skip_static: false,
+		context:     {}
+	};
 
-	constructor(tokens: Token[]) {
+	constructor(tokens: Token[], options?: Partial<TemplateEngineOptions>) {
 		this.tokens = tokens;
 		this.cursor = 0;
+
+		if (options) {
+			this.options = Object.assign(this.options, options);
+		}
 	}
 
 	current_token(): Token {
@@ -1271,27 +1452,21 @@ export class Parser {
 	}
 
 	private expect_token(expected_type: TokenType): Token {
-		const current_token = this.current_token();
+		const current = this.current_token();
 
-		if (current_token.type === TokenType.eof) {
-			throw {
-				message: `Unexpected end of file`,
-				line:    current_token.position.line,
-				column:  current_token.position.column
-			} as TemplateError;
+		if (current.type === TokenType.eof) {
+			const { line, column } = current.position;
+			throw new Error(`Unexpected end of file (${line}:${column})`);
 		}
 
-		if (current_token.type !== expected_type) {
-			throw {
-				message: `Unexpected token '${current_token.value}'`,
-				line:    current_token.position.line,
-				column:  current_token.position.column
-			} as TemplateError;
+		if (current.type !== expected_type) {
+			const { line, column } = current.position;
+			throw new Error(`Unexpected token ${current.value} (${line}:${column})`);
 		}
 
 		this.cursor += 1;
 
-		return current_token;
+		return current;
 	}
 
 	private is_current_token(token_type: TokenType): boolean {
@@ -1338,83 +1513,99 @@ export class Parser {
 		};
 	}
 
-	private parse_css(): CSS {
-		const tag = this.advance_token();
+	private parse_css(): CSS | Skip {
+		this.expect_token(TokenType.tag_start_css);
+
+		const attributes: Block = {
+			type: NodeType.block,
+			body: []
+		};
+
+		while (!this.is_current_token(TokenType.tag_start_end)) {
+			attributes.body.push(this.parse_content());
+		}
+
+		this.expect_token(TokenType.tag_start_end);
 
 		let is_static = true;
 		const body_nodes: Content[] = [];
 
-		while (true) {
-			const next = this.peek_token();
-
-			if (next && next.type === TokenType.css_end) {
-				const node = this.parse_content();
-
-				is_static = is_static && node.type === NodeType.text;
-				body_nodes.push(node);
-				
-				break;
-			}
-
+		while (!this.is_current_token(TokenType.tag_end_css)) {
 			const node = this.parse_content();
-
 			is_static = is_static && node.type === NodeType.text;
 			body_nodes.push(node);
 		}
 
-		this.expect_token(TokenType.css_end);
+		this.expect_token(TokenType.tag_end_css);
 
 		if (is_static) {
 			for (const node of body_nodes) {
 				this.css += (node as Text).value;
 			}
+
+			if (this.options.skip_static === true) {
+				return {
+					type: NodeType.skip
+				}
+			}
 		}
 
 		return {
-			type:   NodeType.css,
-			tag:    tag.value,
+			type: NodeType.css,
+			attributes: attributes,
 			static: is_static,
-			body:   body_nodes
+			body:   {
+				type: NodeType.block,
+				body: body_nodes
+			}
 		};
 	}
 
-	private parse_js(): JS {
-		const tag = this.advance_token();
+	private parse_js(): JS | Skip {
+		this.expect_token(TokenType.tag_start_js);
+
+		const attributes: Block = {
+			type: NodeType.block,
+			body: []
+		}
+
+		while (!this.is_current_token(TokenType.tag_start_end)) {
+			attributes.body.push(this.parse_content());
+		}
+
+		this.expect_token(TokenType.tag_start_end);
 
 		let is_static = true;
 		const body_nodes: Content[] = [];
 
-		while (true) {
-			const next = this.peek_token();
-
-			if (next && next.type === TokenType.js_end) {
-				const node = this.parse_content();
-
-				is_static = is_static && node.type === NodeType.text;
-				body_nodes.push(node);
-
-				break;
-			}
-
+		while (!this.is_current_token(TokenType.tag_end_js)) {
 			const node = this.parse_content();
-
 			is_static = is_static && node.type === NodeType.text;
 			body_nodes.push(node);
 		}
 
-		this.expect_token(TokenType.js_end);
+		this.expect_token(TokenType.tag_end_js);
 
 		if (is_static) {
 			for (const node of body_nodes) {
 				this.js += (node as Text).value;
 			}
+
+			if (this.options.skip_static === true) {
+				return {
+					type: NodeType.skip
+				}
+			}
 		}
 
 		return {
-			type:   NodeType.js,
-			tag:    tag.value,
+			type: NodeType.js,
+			attributes: attributes,
 			static: is_static,
-			body:   body_nodes
+			body: {
+				type: NodeType.block,
+				body: body_nodes
+			}
 		};
 	}
 
@@ -1521,11 +1712,8 @@ export class Parser {
 					break;
 				}
 			} else if (current.type === TokenType.eof) {
-				throw {
-					message: `Unexpected end of file`,
-					line:    current.position.line,
-					column:  current.position.column
-				} as TemplateError;
+				const { line, column } = current.position;
+				throw new Error(`Unexpected end of file (${line}:${column})`);
 			} else {
 				this.advance_token();
 			}
@@ -1584,6 +1772,7 @@ export class Parser {
 	private parse_insert_block(): Insert {
 		this.advance_token();
 
+		// @later -- this.options.static ? string : expr
 		const template = this.expect_token(TokenType.string);
 
 		this.imports.push(template.value);
@@ -1608,6 +1797,7 @@ export class Parser {
 	private parse_use_block(): Use {
 		this.advance_token();
 
+		// @later -- this.options.static ? string : expr
 		const template = this.expect_token(TokenType.string);
 
 		this.imports.push(template.value);
@@ -1654,11 +1844,8 @@ export class Parser {
 			} else if (current.type === TokenType.slot_start) {
 				slot_nodes.push(this.parse_slot_block());
 			} else if (current.type === TokenType.eof) {
-				throw {
-					message: `Unexpected end of file`,
-					line:    current.position.line,
-					column:  current.position.column
-				} as TemplateError;
+				const { line, column } = current.position;
+				throw new Error(`Unexpected end of file (${line}:${column})`);
 			} else {
 				this.advance_token();
 			}
@@ -1911,11 +2098,8 @@ export class Parser {
 			}
 
 			default: {
-				throw {
-					message: `Unexpected token "${current.value}"`,
-					line:    current.position.line,
-					column:  current.position.column
-				} as TemplateError;
+				const { line, column } = current.position;
+				throw new Error(`Unexpected token ${current.value} (${line}:${column})`);
 			}
 		}
 	}
@@ -2087,11 +2271,11 @@ export class Parser {
 				return this.parse_text();
 			}
 
-			case TokenType.css_start: {
+			case TokenType.tag_start_css: {
 				return this.parse_css();
 			}
 
-			case TokenType.js_start: {
+			case TokenType.tag_start_js: {
 				return this.parse_js();
 			}
 
@@ -2126,11 +2310,8 @@ export class Parser {
 					}
 
 					case TokenType.eof: {
-						throw {
-							message: `Unexpected end of file`,
-							line:    current.position.line,
-							column:  current.position.column
-						} as TemplateError;
+						const { line, column } = current.position;
+						throw new Error(`Unexpected end of file (${line}:${column})`);
 					}
 
 					default: {
@@ -2140,48 +2321,36 @@ export class Parser {
 			}
 
 			case TokenType.eof: {
-				throw {
-					message: `Unexpected end of file`,
-					line:    current.position.line,
-					column:  current.position.column
-				} as TemplateError;
+				const { line, column } = current.position;
+				throw new Error(`Unexpected end of file (${line}:${column})`);
 			}
 
 			default: {
-				throw {
-					message: `Unknown token`,
-					line:    current.position.line,
-					column:  current.position.column
-				} as TemplateError;
+				const { line, column } = current.position;
+				throw new Error(`Unknown token ${current.value} (${line}:${column})`);
 			}
 		}
 	}
 
-	parse(): any {
+	parse(): Template {
 		const nodes: Content[] = [];
 
 		while (!this.is_current_token(TokenType.eof)) {
 			nodes.push(this.parse_content());
 		}
 
-		return { 
+		return {
 			imports: this.imports,
-			js:      this.js,
-			css:     this.css,
-			nodes:   nodes
-		};
-
-		// return {
-		// 	type: NodeType.template,
-		// 	imports: imports,
-		// 	body: {
-		// 		type: NodeType.block,
-		// 		body: body
-		// 	}
-		// };
+			js: this.js,
+			css: this.css,
+			ast: {
+				type: NodeType.block,
+				body: nodes
+			}
+		}
 	}
 
-	print_node(node: Template | Content): void {
+	print_node(node: Content): void {
 		console.log(JSON.stringify(node, null, 4));
 	}
 }
@@ -2190,14 +2359,7 @@ export class Renderer {
 	private template:  Template;
 	private templates: Record<string, Template>                      = {};
 	private context:   Record<string, unknown>                       = {};
-	private slots:     Map<string | null, Block>                     = new Map();
-	private mode:      'html' | 'css' | 'js'                         = 'html';
-	public  result:    Record<'html' | 'css' | 'js' | 'all', string> = {
-		html: "",
-		css:  "",
-		js:   "",
-		all:  "",
-	};
+	private slots:     Map<string | null, string>                    = new Map();
 
 	constructor(template: Template, templates: Record<string, Template>, context: Record<string, unknown>) {
 		this.template  = template;
@@ -2285,8 +2447,6 @@ export class Renderer {
 				return (left as number) / (right as number);
 			case TokenType.modulo:
 				return (left as number) % (right as number);
-			default:
-				throw new Error(`Not implemented: ${node.operator}`);
 		}
 	}
 
@@ -2335,69 +2495,60 @@ export class Renderer {
 		}
 	}
 
-	private render_comment(_: Comment): void {
-		// no output
+	private render_skip(_: Skip): string {
+		return "";
 	}
 
-	private render_html_css_start(node: HTMLCSSStart): void {
-		this.mode = 'css';
-		this.result.all += node.value;
+	private render_comment(_: Comment): string {
+		return "";
 	}
 
-	private render_html_css_end(node: HTMLCSSEnd): void {
-		this.mode = 'html';
-		this.result.all += node.value;
+	private render_text(node: Text): string {
+		return node.value;
 	}
 
-	private render_html_js_start(node: HTMLJSStart): void {
-		this.mode = 'js';
-		this.result.all += node.value;
+	private render_css(node: CSS): string {
+		const attributes = this.render_node(node.attributes);
+		const content = this.render_node(node.body);
+		return `<style ${attributes}>${content}</style>`
 	}
 
-	private render_html_js_end(node: HTMLJSEnd): void {
-		this.mode = 'html';
-		this.result.all += node.value;
+	private render_js(node: JS): string {
+		const attributes = this.render_node(node.attributes);
+		const content = this.render_node(node.body);
+		return `<script ${attributes}>${content}</script>`
 	}
 
-	private render_text(node: Text): void {
-		this.result.html += node.value;
-		this.result.all += node.value;
-	}
-
-	private render_css(node: CSS): void {
-		this.result.css += node.value;
-		this.result.all += node.value;
-	}
-
-	private render_js(node: JS): void {
-		this.result.js += node.value;
-		this.result.all += node.value;
-	}
-
-	private render_if_block(node: If): void {
+	private render_if_block(node: If): string {
 		if (this.eval_node(node.condition)) {
-			this.render_node(node.consequent);
-		} else if (node.alternate) {
-			this.render_node(node.alternate);
+			return this.render_node(node.consequent);
 		}
+
+		if (node.alternate) {
+			return this.render_node(node.alternate);
+		}
+
+		return "";
 	}
 
-	private render_for_block(node: For): void {
+	private render_for_block(node: For): string {
 		const iterable = this.eval_node(node.iterable);
 
 		const initial_iterator = this.context[node.iterator];
 		const initial_index    = this.context[node.index as string];
 
+		let output = "";
+
 		try {
 			if (iterable === null || iterable === undefined) {
-				return;
+				return "";
 			}
 
 			if (typeof iterable === 'string') {
 				const loop_string = iterable;
 
 				if (loop_string.length === 0) {
-					return;
+					return "";
 				}
 
 				for (let i = 0; i < loop_string.length; i++) {
@@ -2407,13 +2558,13 @@ export class Renderer {
 						this.context[node.index as string] = i;
 					}
 
-					this.render_node(node.body);
+					output += this.render_node(node.body);
 				}
 			} else if (Array.isArray(iterable)) {
 				const loop_array = iterable;
 
 				if (loop_array.length === 0) {
-					return;
+					return "";
 				}
 
 				for (let i = 0; i < loop_array.length; i++) {
@@ -2423,13 +2574,13 @@ export class Renderer {
 						this.context[node.index as string] = i;
 					}
 
-					this.render_node(node.body);
+					output += this.render_node(node.body);
 				}
 			} else if (typeof iterable === 'number') {
 				const loop_number = iterable;
 
 				if (loop_number <= 0) {
-					return;
+					return "";
 				}
 
 				for (let i = 0; i < loop_number; i++) {
@@ -2439,7 +2590,7 @@ export class Renderer {
 						this.context[node.index as string] = i;
 					}
 
-					this.render_node(node.body);
+					output += this.render_node(node.body);
 				}
 			} else if (typeof iterable === 'object') {
 				const loop_object = iterable as any;
@@ -2454,7 +2605,7 @@ export class Renderer {
 						this.context[node.index as string] = key;
 					}
 
-					this.render_node(node.body);
+					output += this.render_node(node.body);
 				}
 			}
 		} finally {
@@ -2470,29 +2621,31 @@ export class Renderer {
 				delete this.context[node.index as string];
 			}
 		}
+
+		return output;
 	}
 
-	private render_switch_block(node: Switch): void {
+	private render_switch_block(node: Switch): string {
 		const test = this.eval_node(node.test);
 
 		for (const switch_case of node.cases) {
 			if (switch_case.tests === null) {
-				this.render_node(switch_case.body);
-				return;
+				return this.render_node(switch_case.body);
 			}
 
 			for (const test_expr of switch_case.tests) {
 				const test_value = this.eval_node(test_expr);
 
 				if (test_value === test) {
-					this.render_node(switch_case.body);
-					return;
+					return this.render_node(switch_case.body);
 				}
 			}
 		}
+
+		return "";
 	}
 
-	private render_use_block(node: Use): void {
+	private render_use_block(node: Use): string {
 		const initial_context: Record<string, unknown> = {};
 
 		for (const pair of node.values) {
@@ -2510,10 +2663,10 @@ export class Renderer {
 		}
 
 		for (const block of node.slots) {
-			this.slots.set(block.name, block.body);
+			this.slots.set(block.name, this.render_node(block.body));
 		}
 
-		this.render_template(template);
+		const inserted = this.render_node(template.ast);
 
 		for (const pair of node.values) {
 			if (initial_context.hasOwnProperty(pair.key)) {
@@ -2524,19 +2677,21 @@ export class Renderer {
 		}
 
 		this.slots.clear();
+
+		return inserted;
 	}
 
-	private render_slot_block(node: Slot): void {
-		const slot_value = this.slots.get(node.name);
+	private render_slot_block(node: Slot): string {
+		const rendered_slot = this.slots.get(node.name);
 
-		if (slot_value) {
-			this.render_node(slot_value);
+		if (rendered_slot) {
+			return rendered_slot;
 		} else {
-			this.render_node(node.body);
+			return this.render_node(node.body);
 		}
 	}
 
-	private render_insert(node: Insert): void {
+	private render_insert(node: Insert): string {
 		const initial_context: Record<string, unknown> = {};
 
 		for (const pair of node.values) {
@@ -2550,7 +2705,7 @@ export class Renderer {
 			throw new Error(`Template "${node.template}" not compiled`);
 		}
 
-		this.render_template(template);
+		const inserted = this.render_node(template.ast);
 
 		for (const pair of node.values) {
 			if (initial_context.hasOwnProperty(pair.key)) {
@@ -2559,90 +2714,78 @@ export class Renderer {
 				delete this.context[pair.key];
 			}
 		}
+
+		return inserted;
 	}
 
-	private render_block(node: Block): void {
+	private render_block(node: Block): string {
+		let output = "";
+
 		for (const block of node.body) {
-			this.render_node(block);
+			output += this.render_node(block);
 		}
+
+		return output;
 	}
 
-	private render_template(node: Template): void {
-		this.render_node(node.body);
-	}
-
-	private render_content(node: Content): void {
+	private render_content(node: Content): string {
 		const value = this.eval_node(node);
 
 		if (value === null || value === undefined) {
-			return;
+			return "";
 		}
 
-		const output = String(value);
-		this.result[this.mode] += output;
-		this.result.all += output;
+		return String(value);
 	}
 
-	private render_node(node: Template | Content): void {
+	private render_node(node: Content): string {
 		switch(node.type) {
-			case NodeType.template: {
-				this.render_template(node);
-				break;
+			case NodeType.skip: {
+				return this.render_skip(node);
 			}
 
 			case NodeType.text: {
-				this.render_text(node);
-				break;
+				return this.render_text(node);
 			}
 
 			case NodeType.css: {
-				this.render_css(node);
-				break;
+				return this.render_css(node);
 			}
 
 			case NodeType.js: {
-				this.render_js(node);
-				break;
+				return this.render_js(node);
 			}
 
 			case NodeType.comment: {
-				this.render_comment(node);
-				break;
+				return this.render_comment(node);
 			}
 
 			case NodeType.block: {
-				this.render_block(node);
-				break;
+				return this.render_block(node);
 			}
 
 			case NodeType.block_if: {
-				this.render_if_block(node);
-				break;
+				return this.render_if_block(node);
 			}
 
 			case NodeType.block_for: {
-				this.render_for_block(node);
-				break;
+				return this.render_for_block(node);
 			}
 
 			case NodeType.block_switch: {
-				this.render_switch_block(node);
-				break;
+				return this.render_switch_block(node);
 			}
 
 			case NodeType.block_use: {
-				this.render_use_block(node);
-				break;
+				return this.render_use_block(node);
 			}
 
 			case NodeType.block_slot: {
-				this.render_slot_block(node);
-				break;
+				return this.render_slot_block(node);
 			}
 
 			case NodeType.block_insert: {
-				this.render_insert(node);
-				break;
+				return this.render_insert(node);
 			}
 
 			case NodeType.identifier:
@@ -2655,76 +2798,87 @@ export class Renderer {
 			case NodeType.literal_boolean:
 			case NodeType.literal_float:
 			case NodeType.literal_null: {
-				this.render_content(node);
-				break;
+				return this.render_content(node);
 			}
 
 			default: {
-				console.log('NI %s', node.type);
+				return "";
 			}
 		}
 	}
 
 	render() {
-		this.render_node(this.template);
-		return this.result;
+		return this.render_node(this.template.ast);
 	}
 }
 
 export class TemplateEngine {
-	private templates: Record<string, Template> = {};
-	private imports:   Record<string, string[]> = {};
-	private debug:     boolean                  = true;
+	templates: Record<string, Template> = {};
+	imports:   Record<string, string[]> = {};
+	options:   TemplateEngineOptions    = {
+		debug:       false,
+		skip_static: false,
+		context:     {}
+	};
 
-	compile(template_name: string, content: string): Template | undefined {
-		try {
-			const lexer    = new Lexer(content);
-			const tokens   = lexer.tokenize();
-
-			if (this.debug) {
-				for (const token of tokens) {
-					lexer.print_token(token);
-				}
-			}
-
-			const parser   = new Parser(tokens);
-			const template = parser.parse() as any;
-
-			this.templates[template_name] = template;
-			this.imports[template_name] = template.imports;
-
-			if (this.debug) {
-				parser.print_node(template);
-			}
-
-			return template;
-		} catch({ message, line, column}: any) {
-			throw new Error(`sfl-template: ${message} (${line}:${column})`);
+	constructor(options?: Partial<TemplateEngineOptions>) {
+		if (options) {
+			this.options = Object.assign(this.options, options);
 		}
 	}
 
+	compile(template_name: string, content: string): Template {
+		const lexer    = new Lexer(content);
+		const tokens   = lexer.tokenize();
 
-
-	render(name: string, context: Record<string, unknown> = {}): Record<'html' | 'css' | 'js' | 'all', string> {
-		try {
-			const template = this.templates[name];
-
-			if (!template) {
-				throw new Error(`Template "${name}" not compiled`);
+		if (this.options.debug) {
+			for (const token of tokens) {
+				lexer.print_token(token);
 			}
-
-			this.check_import_cycles();
-
-			const renderer = new Renderer(template!, this.templates, context);
-			const result = renderer.render();
-
-			return result;
-		} catch({ message }: any) {
-			throw new Error(`sfl-template: ${message}`);
 		}
+
+		const parser   = new Parser(tokens, this.options);
+		const template = parser.parse();
+
+		this.templates[template_name] = template;
+		this.imports[template_name]   = template.imports;
+
+		this.check_import_cycles();
+
+		if (this.options.debug) {
+			parser.print_node(template.ast);
+		}
+
+		return template;
 	}
 
-	run(template_name: string, content: string, context: Record<string, unknown> = {}): Record<'html' | 'css' | 'js' | 'all', string> {
+	add(template_name: string, template: Template): Template {
+		this.templates[template_name] = template;
+		this.imports[template_name]   = template.imports;
+
+		this.check_import_cycles();
+
+		return template;
+	}
+
+	get(template_name: string): Template {
+		return this.templates[template_name];
+	}
+
+	render(name: string, context: Record<string, unknown> = {}): string {
+		const template = this.templates[name];
+
+		if (!template) {
+			throw new Error(`Template "${name}" not compiled`);
+		}
+
+		const renderer = new Renderer(template, this.templates, Object.assign(this.options.context, context));
+		const result = renderer.render();
+
+		return result;
+	}
+
+	run(template_name: string, content: string, context: Record<string, unknown> = {}): string {
 		this.compile(template_name, content);
 		return this.render(template_name, context);
 	}
