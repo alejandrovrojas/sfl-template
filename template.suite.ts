@@ -46,14 +46,14 @@ export class TestSuite {
 
 		for (let i = 0; i < actual_keys.length; i++) {
 			if (actual_keys[i] !== expected_keys[i]) {
-				const msg = message || `object key mismatch: expected ${expected_keys[i]}, got ${actual_keys[i]}`;
+				const msg = message || `object key mismatch: expected “${expected_keys[i]}”, got “${actual_keys[i]}”`;
 				throw new Error(msg);
 			}
 		}
 
 		for (const key of actual_keys) {
 			if (actual[key] !== expected[key]) {
-				const msg = message || `object value mismatch for key '${key}': expected ${expected[key]}, got ${actual[key]}`;
+				const msg = message || `object value mismatch for key “${key}”: expected “${expected[key]}”, got “${actual[key]}”`;
 				throw new Error(msg);
 			}
 		}

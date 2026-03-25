@@ -486,7 +486,7 @@ export class Lexer {
 	}
 
 	private is_whitespace(ch: string): boolean {
-		return (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r');
+		return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
 	}
 
 	private is_keyword_boundary(ch: string): boolean {
@@ -548,7 +548,7 @@ export class Lexer {
 			if (this.cursor >= this.input.length) {
 				return {
 					type: TokenType.eof,
-					value: "",
+					value: '',
 					position: {
 						line:   this.line,
 						column: this.column,
@@ -1365,7 +1365,7 @@ export class Lexer {
 							}
 
 							// strings
-							if (ch === '\'' || ch === '"') {
+							if (ch === "'" || ch === '"') {
 								const quote = ch;
 
 								this.advance_ch();
@@ -2238,11 +2238,13 @@ export class Parser {
 			if (this.is_current_token(TokenType.period)) {
 				this.advance_token();
 
-				const prop_token = this.current_token();
+				const property_token = this.current_token();
+
 				const property: Identifier = {
 					type: NodeType.identifier,
-					name: prop_token.value,
+					name: property_token.value,
 				};
+
 				this.advance_token();
 
 				left = {
@@ -2480,12 +2482,9 @@ export class Renderer {
 			return null;
 		}
 
-		const property = node.computed
-			? this.eval_node(node.property)
-			: (node.property as Identifier).name;
+		const property = node.computed ? this.eval_node(node.property) : (node.property as Identifier).name;
 
-
-		if (typeof property !== "string" && typeof property !== "number") {
+		if (typeof property !== 'string' && typeof property !== 'number') {
 			return null;
 		}
 
@@ -2539,7 +2538,7 @@ export class Renderer {
 	}
 
 	private eval_node(node: Content): unknown {
-		switch(node.type) {
+		switch (node.type) {
 			case NodeType.identifier: {
 				return this.eval_identifier(node);
 			}
@@ -2584,11 +2583,11 @@ export class Renderer {
 	}
 
 	private render_skip(_: Skip): string {
-		return "";
+		return '';
 	}
 
 	private render_comment(_: Comment): string {
-		return "";
+		return '';
 	}
 
 	private render_text(node: Text): string {
@@ -2598,13 +2597,13 @@ export class Renderer {
 	private render_css(node: CSS): string {
 		const attributes = this.render_node(node.attributes);
 		const content = this.render_node(node.body);
-		return `<style${attributes}>${content}</style>`
+		return `<style${attributes}>${content}</style>`;
 	}
 
 	private render_js(node: JS): string {
 		const attributes = this.render_node(node.attributes);
 		const content = this.render_node(node.body);
-		return `<script${attributes}>${content}</script>`
+		return `<script${attributes}>${content}</script>`;
 	}
 
 	private render_if_block(node: If): string {
@@ -2616,7 +2615,7 @@ export class Renderer {
 			return this.render_node(node.alternate);
 		}
 
-		return "";
+		return '';
 	}
 
 	private render_for_block(node: For): string {
@@ -2625,18 +2624,18 @@ export class Renderer {
 		const initial_iterator = this.context[node.iterator];
 		const initial_index    = this.context[node.index as string];
 
-		let output = "";
+		let output = '';
 
 		try {
 			if (iterable === null || iterable === undefined) {
-				return "";
+				return '';
 			}
 
 			if (typeof iterable === 'string') {
 				const loop_string = iterable;
 
 				if (loop_string.length === 0) {
-					return "";
+					return '';
 				}
 
 				for (let i = 0; i < loop_string.length; i++) {
@@ -2652,7 +2651,7 @@ export class Renderer {
 				const loop_array = iterable;
 
 				if (loop_array.length === 0) {
-					return "";
+					return '';
 				}
 
 				for (let i = 0; i < loop_array.length; i++) {
@@ -2668,7 +2667,7 @@ export class Renderer {
 				const loop_number = iterable;
 
 				if (loop_number <= 0) {
-					return "";
+					return '';
 				}
 
 				for (let i = 0; i < loop_number; i++) {
@@ -2730,7 +2729,7 @@ export class Renderer {
 			}
 		}
 
-		return "";
+		return '';
 	}
 
 	private render_use_block(node: Use): string {
@@ -2808,7 +2807,7 @@ export class Renderer {
 
 	private render_recurse(node: Recurse): string {
 		if (this.recurse_depth >= this.recurse_max) {
-			return "";
+			return '';
 		}
 
 		const initial_context: Record<string, unknown> = {};
@@ -2840,7 +2839,7 @@ export class Renderer {
 	}
 
 	private render_block(node: Block): string {
-		let output = "";
+		let output = '';
 
 		for (const block of node.body) {
 			output += this.render_node(block);
@@ -2853,14 +2852,14 @@ export class Renderer {
 		const value = this.eval_node(node);
 
 		if (value === null || value === undefined) {
-			return "";
+			return '';
 		}
 
 		return String(value);
 	}
 
 	private render_node(node: Content): string {
-		switch(node.type) {
+		switch (node.type) {
 			case NodeType.skip: {
 				return this.render_skip(node);
 			}
@@ -2928,7 +2927,7 @@ export class Renderer {
 			}
 
 			default: {
-				return "";
+				return '';
 			}
 		}
 	}
