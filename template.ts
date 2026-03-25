@@ -172,6 +172,7 @@ export enum TokenType {
 	case_start             = "case_start",
 	default_start          = "default_start",
 	insert_start           = "insert_start",
+	recurse_start          = "recurse_start",
 	use_start              = "use_start",
 	use_end                = "use_end",
 	slot_start             = "slot_start",
@@ -225,6 +226,7 @@ enum NodeType {
 	block_slot             = "block_slot",
 	block_use              = "block_use",
 	block_insert           = "block_insert",
+	block_recurse          = "block_recurse",
 	literal_null           = "literal_null",
 	literal_int            = "literal_int",
 	literal_float          = "literal_float",
@@ -272,6 +274,7 @@ type Statement =
 	| Case
 	| For
 	| Insert
+	| Recurse
 	| Use
 	| Slot;
 
@@ -372,6 +375,12 @@ type Insert = {
 	values:     KeyValue[];
 }
 
+type Recurse = {
+	type:       NodeType.block_recurse;
+	template:   string;
+	values:     KeyValue[];
+}
+
 type Use = {
 	type:       NodeType.block_use;
 	template:   string;
@@ -406,9 +415,10 @@ type ExpressionUnary = {
 }
 
 type ExpressionMember = {
-	type:       NodeType.expression_member,
+	type:       NodeType.expression_member;
 	object:     Expression;
 	property:   Expression;
+	computed:   boolean;
 }
 
 type Identifier = {
@@ -1291,6 +1301,26 @@ export class Lexer {
 							return this.create_token(start_cursor, start_position);
 						}
 
+						// recurse
+						if (
+							this.cursor + 8 <= this.input.length &&
+							this.input[this.cursor]     === 'r' &&
+							this.input[this.cursor + 1] === 'e' &&
+							this.input[this.cursor + 2] === 'c' &&
+							this.input[this.cursor + 3] === 'u' &&
+							this.input[this.cursor + 4] === 'r' &&
+							this.input[this.cursor + 5] === 's' &&
+							this.input[this.cursor + 6] === 'e' &&
+							this.is_keyword_boundary(this.input[this.cursor + 7])
+						) {
+							for (let i = 0; i < 7; i++) {
+								this.advance_ch();
+							}
+
+							this.type = TokenType.recurse_start;
+							return this.create_token(start_cursor, start_position);
+						}
+
 						// identifiers
 						if (this.is_alpha(ch)) {
 							while (true) {
@@ -1794,6 +1824,28 @@ export class Parser {
 		}
 	}
 
+	private parse_recurse_block(): Recurse {
+		this.advance_token();
+
+		const template = this.expect_token(TokenType.string);
+
+		let values: KeyValue[] = [];
+
+		if (this.current_token().type == TokenType.l_parenthesis) {
+			this.advance_token();
+			values = this.parse_key_value_list();
+			this.expect_token(TokenType.r_parenthesis);
+		}
+
+		this.expect_token(TokenType.expr_end);
+
+		return {
+			type:     NodeType.block_recurse,
+			template: template.value,
+			values:   values
+		}
+	}
+
 	private parse_use_block(): Use {
 		this.advance_token();
 
@@ -2172,12 +2224,18 @@ export class Parser {
 			if (this.is_current_token(TokenType.period)) {
 				this.advance_token();
 
-				const property = this.parse_identifier();
+				const prop_token = this.current_token();
+				const property: Identifier = {
+					type: NodeType.identifier,
+					name: prop_token.value,
+				};
+				this.advance_token();
 
 				left = {
 					type:     NodeType.expression_member,
 					object:   left,
 					property: property,
+					computed: false,
 				};
 			} else if (this.is_current_token(TokenType.l_bracket)) {
 				this.advance_token();
@@ -2190,6 +2248,7 @@ export class Parser {
 					type:     NodeType.expression_member,
 					object:   left,
 					property: property,
+					computed: true,
 				};
 			} else if (this.is_current_token(TokenType.l_parenthesis)) {
 				this.advance_token();
@@ -2301,6 +2360,10 @@ export class Parser {
 						return this.parse_insert_block();
 					}
 
+					case TokenType.recurse_start: {
+						return this.parse_recurse_block();
+					}
+
 					case TokenType.use_start: {
 						return this.parse_use_block();
 					}
@@ -2356,10 +2419,12 @@ export class Parser {
 }
 
 export class Renderer {
-	private template:  Template;
-	private templates: Record<string, Template>                      = {};
-	private context:   Record<string, unknown>                       = {};
-	private slots:     Map<string | null, string>                    = new Map();
+	private template:      Template;
+	private templates:     Record<string, Template>                  = {};
+	private context:       Record<string, unknown>                   = {};
+	private slots:         Map<string | null, string>                = new Map();
+	private recurse_depth: number                                    = 0;
+	private recurse_max:   number                                    = 32;
 
 	constructor(template: Template, templates: Record<string, Template>, context: Record<string, unknown>) {
 		this.template  = template;
@@ -2401,9 +2466,10 @@ export class Renderer {
 			return null;
 		}
 
-		const property = (node.property.type === NodeType.identifier)
-			? node.property.name
-			: this.eval_node(node.property);
+		const property = node.computed
+			? this.eval_node(node.property)
+			: (node.property as Identifier).name;
+
 
 		if (typeof property !== "string" && typeof property !== "number") {
 			return null;
@@ -2470,6 +2536,14 @@ export class Renderer {
 
 			case NodeType.expression_member: {
 				return this.eval_expression_member(node);
+			}
+
+			case NodeType.expression_unary: {
+				const unary = node as ExpressionUnary;
+				const operand = this.eval_node(unary.operand);
+				if (unary.operator === TokenType.minus) return -(operand as number);
+				if (unary.operator === TokenType.exclamation_mark) return !operand;
+				return null;
 			}
 
 			case NodeType.expression_binary: {
@@ -2718,6 +2792,39 @@ export class Renderer {
 		return inserted;
 	}
 
+	private render_recurse(node: Recurse): string {
+		if (this.recurse_depth >= this.recurse_max) {
+			return "";
+		}
+
+		const initial_context: Record<string, unknown> = {};
+
+		for (const pair of node.values) {
+			initial_context[pair.key] = this.context[pair.key];
+			this.context[pair.key] = this.eval_node(pair.value);
+		}
+
+		const template = this.templates[node.template];
+
+		if (!template) {
+			throw new Error(`Template "${node.template}" not compiled`);
+		}
+
+		this.recurse_depth++;
+		const inserted = this.render_node(template.ast);
+		this.recurse_depth--;
+
+		for (const pair of node.values) {
+			if (initial_context.hasOwnProperty(pair.key)) {
+				this.context[pair.key] = initial_context[pair.key];
+			} else {
+				delete this.context[pair.key];
+			}
+		}
+
+		return inserted;
+	}
+
 	private render_block(node: Block): string {
 		let output = "";
 
@@ -2788,9 +2895,14 @@ export class Renderer {
 				return this.render_insert(node);
 			}
 
+			case NodeType.block_recurse: {
+				return this.render_recurse(node);
+			}
+
 			case NodeType.identifier:
 			case NodeType.function_call:
 			case NodeType.expression_member:
+			case NodeType.expression_unary:
 			case NodeType.expression_binary:
 			case NodeType.expression_conditional:
 			case NodeType.literal_int:
