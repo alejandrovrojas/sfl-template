@@ -418,7 +418,7 @@ tests.run('if: condition uses member expression', () => {
 tests.run('for: iterate over number', () => {
 	const engine = new TemplateEngine();
 	const result = engine.run('_', '{for n in 3}{n}{/for}');
-	tests.assert_equal(result, '012');
+	tests.assert_equal(result, '123');
 });
 
 tests.run('for: iterate over array', () => {
@@ -437,6 +437,12 @@ tests.run('for: iterate over object values', () => {
 	const engine = new TemplateEngine();
 	const result = engine.run('_', '{for v in obj}{v},{/for}', { obj: { a: 1, b: 2 } });
 	tests.assert_equal(result, '1,2,');
+});
+
+tests.run('for: index variable over number', () => {
+	const engine = new TemplateEngine();
+	const result = engine.run('_', '{for n, i in 3}{n}:{i},{/for}');
+	tests.assert_equal(result, '1:0,2:1,3:2,');
 });
 
 tests.run('for: index variable over array', () => {
@@ -527,13 +533,13 @@ tests.run('mixed: multiple expressions in one template', () => {
 tests.run('mixed: if inside for', () => {
 	const engine = new TemplateEngine();
 	const result = engine.run('_', '{for n in 4}{if n % 2 == 0}{n}{/if}{/for}');
-	tests.assert_equal(result, '02');
+	tests.assert_equal(result, '24');
 });
 
 tests.run('mixed: ternary inside for', () => {
 	const engine = new TemplateEngine();
 	const result = engine.run('_', `{for n in 3}{n % 2 == 0 ? 'e' : 'o'}{/for}`);
-	tests.assert_equal(result, 'eoe');
+	tests.assert_equal(result, 'oeo');
 });
 
 tests.run('mixed: member expression in for body', () => {
@@ -565,11 +571,8 @@ tests.run('html: multiline attributes', () => {
 tests.run('html: tags in style/script attributes', () => {
 	const engine = new TemplateEngine();
 	const result = engine.run('_', `
-		<style test="{message}">
-		</style>
-
-		<script test="{message}">
-		</script>
+		<style test="{message}"></style>
+		<script test="{message}"></script>
 	`, {
 		message: "hello"
 	});
@@ -577,14 +580,35 @@ tests.run('html: tags in style/script attributes', () => {
 	tests.assert_equal(result, `<style test="hello"></style><script test="hello"></script>`);
 });
 
-tests.run('text: trimmed text values', () => {
+tests.run('whitespace: space around text', () => {
 	const engine = new TemplateEngine();
 
 	const result = engine.run('_', `
+
 		<div>  this {message} is preserved    </div>
+
+
 	`, { message: 'hello' });
 
 	tests.assert_equal(result, `<div>  this hello is preserved    </div>`);
+});
+
+tests.run('whitespace: space between blocks', () => {
+	const engine = new TemplateEngine();
+
+	const result = engine.run('_', `
+		--
+		{for n, i in 5}
+			<div>
+				{if n == 5}
+					{n}
+				{/if}
+			</div>
+		{/for}
+		--
+	`, { message: 'hello' });
+
+	tests.assert_equal(result, "--<div></div><div></div><div></div><div></div><div>5</div>--")
 });
 
 tests.print_results();
