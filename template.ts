@@ -526,894 +526,907 @@ export class Lexer {
 		}
 	}
 
-	private create_token(start_cursor: number, start_position: TokenPosition): Token {
-		let token_value = this.input.slice(start_cursor, this.cursor);
+	private create_token(start_cursor: number, end_cursor: number = this.cursor): Token {
+		let token_value = this.input.slice(start_cursor, end_cursor);
 
 		if (this.type === TokenType.string) {
-			token_value = this.input.slice(start_cursor + 1, this.cursor - 1);
+			token_value = this.input.slice(start_cursor + 1, end_cursor - 1);
 		}
 
 		return {
-			type: this.type,
+			type:  this.type,
 			value: token_value,
-			position: start_position,
+			position: {
+				line:   this.line,
+				column: this.column,
+			}
 		};
 	}
 
 	tokenize_lexeme(): Token {
-		while (true) {
-			const ch = this.current_ch();
-
-			if (!ch || !this.is_whitespace(ch)) {
-				break;
-			}
-
-			this.advance_ch();
-		}
-
-		const start_position: TokenPosition = {
-			line:   this.line,
-			column: this.column,
-		};
-
-		if (this.cursor >= this.input.length) {
-			return {
-				type: TokenType.eof,
-				value: "",
-				position: start_position
-			};
-		}
-
-		const start_cursor = this.cursor;
-
-		while (this.cursor < this.input.length) {
-			const ch = this.input[this.cursor];
-
-			// @note -- probably too drastic for newlines inside text?
-			if (ch === '\n' || ch === '\r') {
-				break;
-			}
-
-			if (ch === '/') {
-				if (this.cursor + 1 < this.input.length && this.input[this.cursor + 1] === '/') {
-					this.mode = LexerMode.comment;
-				}
-			}
-
-			if (this.mode === LexerMode.comment) {
-				this.type = TokenType.comment;
-
-				while (true) {
-					const c = this.current_ch();
-
-					if (!c || c === '\n' || c === '\r') {
-						break;
+		outer: while (true) {
+			if (this.cursor >= this.input.length) {
+				return {
+					type: TokenType.eof,
+					value: "",
+					position: {
+						line:   this.line,
+						column: this.column,
 					}
-
-					this.advance_ch();
-				}
-
-				this.mode = LexerMode.text;
-				break;
+				};
 			}
 
-			if (this.mode === LexerMode.text) {
-				this.type = TokenType.text;
+			let start_cursor = this.cursor;
 
-				if (ch === '<') {
-					// <script> or <script ...>
-					if (
-						this.cursor + 7 <= this.input.length &&
-						this.input[this.cursor + 1] === 's' &&
-						this.input[this.cursor + 2] === 'c' &&
-						this.input[this.cursor + 3] === 'r' &&
-						this.input[this.cursor + 4] === 'i' &&
-						this.input[this.cursor + 5] === 'p' &&
-						this.input[this.cursor + 6] === 't' &&
-						(this.input[this.cursor + 7] === '>' || this.is_whitespace(this.input[this.cursor + 7]))
-					) {
-						if (this.cursor > start_cursor) {
+			inner: while (this.cursor < this.input.length) {
+				const ch = this.input[this.cursor];
+
+				if (ch === '/') {
+					if (this.cursor + 1 < this.input.length && this.input[this.cursor + 1] === '/') {
+						this.mode = LexerMode.comment;
+					}
+				}
+
+				if (this.mode === LexerMode.comment) {
+					this.type = TokenType.comment;
+
+					while (true) {
+						const ch = this.current_ch();
+
+						if (ch === '\n' || ch === '\r') {
 							break;
 						}
 
-						for (let i = 0; i < 7; i++) {
-							this.advance_ch();
-						}
-
-						this.type = TokenType.tag_start_js;
-						this.mode = LexerMode.tag;
-						this.tag_prev_mode = LexerMode.js;
-
-						break;
-					}
-
-					// <style> or <style ...>
-					if (
-						this.cursor + 6 <= this.input.length &&
-						this.input[this.cursor + 1] === 's' &&
-						this.input[this.cursor + 2] === 't' &&
-						this.input[this.cursor + 3] === 'y' &&
-						this.input[this.cursor + 4] === 'l' &&
-						this.input[this.cursor + 5] === 'e' &&
-						(this.input[this.cursor + 6] === '>' || this.is_whitespace(this.input[this.cursor + 6]))
-					) {
-						if (this.cursor > start_cursor) {
-							break;
-						}
-
-						for (let i = 0; i < 6; i++) {
-							this.advance_ch();
-						}
-
-						this.type = TokenType.tag_start_css;
-						this.mode = LexerMode.tag;
-						this.tag_prev_mode = LexerMode.css;
-
-						break;
-					}
-				}
-
-				if (ch === '{') {
-					if (this.cursor > start_cursor) {
-						break;
-					}
-
-					this.prev_mode = this.mode;
-					this.mode = LexerMode.expr;
-
-					break;
-				}
-			}
-
-			if (this.mode === LexerMode.css) {
-				this.type = TokenType.text_css;
-
-				// </style>
-				if (
-					ch === '<' &&
-					this.cursor + 8 <= this.input.length &&
-					this.input[this.cursor + 1] === '/' &&
-					this.input[this.cursor + 2] === 's' &&
-					this.input[this.cursor + 3] === 't' &&
-					this.input[this.cursor + 4] === 'y' &&
-					this.input[this.cursor + 5] === 'l' &&
-					this.input[this.cursor + 6] === 'e' &&
-					this.input[this.cursor + 7] === '>'
-				) {
-					if (this.cursor > start_cursor) {
-						break;
-					}
-
-					this.type = TokenType.tag_end_css;
-
-					for (let i = 0; i < 8; i++) {
 						this.advance_ch();
 					}
 
 					this.mode = LexerMode.text;
-
 					break;
 				}
 
-				// @{}
-				if (ch === '@') {
-					if (this.cursor + 1 < this.input.length && this.input[this.cursor + 1] === '{') {
-						if (this.cursor > start_cursor) {
-							break;
-						}
+				if (this.mode === LexerMode.text) {
+					this.type = TokenType.text;
 
-						this.prev_mode = this.mode;
-						this.mode = LexerMode.expr;
-
-						break;
-					}
-				}
-			}
-
-			if (this.mode === LexerMode.js) {
-				this.type = TokenType.text_js;
-
-				// </script>
-				if (
-					ch === '<' &&
-					this.cursor + 9 <= this.input.length &&
-					this.input[this.cursor + 1] === '/' &&
-					this.input[this.cursor + 2] === 's' &&
-					this.input[this.cursor + 3] === 'c' &&
-					this.input[this.cursor + 4] === 'r' &&
-					this.input[this.cursor + 5] === 'i' &&
-					this.input[this.cursor + 6] === 'p' &&
-					this.input[this.cursor + 7] === 't' &&
-					this.input[this.cursor + 8] === '>'
-				) {
-					if (this.cursor > start_cursor) {
-						break;
-					}
-
-					this.type = TokenType.tag_end_js;
-
-					for (let i = 0; i < 9; i++) {
+					if (ch === '\t' || ch === '\n' || ch === '\r') {
 						this.advance_ch();
-					}
 
-					this.mode = LexerMode.text;
-
-					break;
-				}
-
-				// @{}
-				if (ch === '@') {
-					if (this.cursor + 1 < this.input.length && this.input[this.cursor + 1] === '{') {
-						if (this.cursor > start_cursor) {
-							break;
+						if (this.cursor - 1 === start_cursor) {
+							start_cursor = this.cursor;
 						}
 
-						this.prev_mode = this.mode;
-						this.mode = LexerMode.expr;
-
-						break;
-					}
-				}
-			}
-
-			if (this.mode === LexerMode.tag) {
-				this.type = TokenType.text;
-
-				if (ch === '>') {
-					if (this.cursor > start_cursor) {
-						break;
+						continue inner;
 					}
 
-					this.advance_ch();
-
-					this.type = TokenType.tag_start_end;
-					this.mode = this.tag_prev_mode;
-
-					return this.create_token(start_cursor, start_position);
-				}
-
-				if (ch === '{') {
-					if (this.cursor > start_cursor) {
-						break;
-					}
-
-					this.prev_mode = this.mode;
-					this.mode = LexerMode.expr;
-
-					break;
-				}
-			}
-
-			if (this.mode === LexerMode.expr) {
-				if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
-					return this.tokenize_lexeme();
-				}
-
-				switch (ch) {
-					case '@': {
-						if (this.cursor + 1 < this.input.length && this.input[this.cursor + 1] === '{') {
-							this.advance_ch();
-							this.advance_ch();
-							this.type = TokenType.expr_start;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						break;
-					}
-
-					case '{': {
-						this.advance_ch();
-						this.type = TokenType.expr_start;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '}': {
-						this.advance_ch();
-						this.type = TokenType.expr_end;
-						this.mode = this.prev_mode;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '/': {
-						// {/use}
-						if (
-							this.cursor + 4 <= this.input.length &&
-							this.input[this.cursor + 1] === 'u' &&
-							this.input[this.cursor + 2] === 's' &&
-							this.input[this.cursor + 3] === 'e'
-						) {
-							for (let i = 0; i < 4; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.use_end;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// {/slot}
-						if (
-							this.cursor + 5 <= this.input.length &&
-							this.input[this.cursor + 1] === 's' &&
-							this.input[this.cursor + 2] === 'l' &&
-							this.input[this.cursor + 3] === 'o' &&
-							this.input[this.cursor + 4] === 't'
-						) {
-							for (let i = 0; i < 5; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.slot_end;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// {/for}
-						if (
-							this.cursor + 4 <= this.input.length &&
-							this.input[this.cursor + 1] === 'f' &&
-							this.input[this.cursor + 2] === 'o' &&
-							this.input[this.cursor + 3] === 'r'
-						) {
-							for (let i = 0; i < 4; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.for_end;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// {/if}
-						if (
-							this.cursor + 3 <= this.input.length &&
-							this.input[this.cursor + 1] === 'i' &&
-							this.input[this.cursor + 2] === 'f'
-						) {
-							for (let i = 0; i < 3; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.if_end;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// {/switch}
+					if (ch === '<') {
+						// <script> or <script ...>
 						if (
 							this.cursor + 7 <= this.input.length &&
 							this.input[this.cursor + 1] === 's' &&
-							this.input[this.cursor + 2] === 'w' &&
-							this.input[this.cursor + 3] === 'i' &&
-							this.input[this.cursor + 4] === 't' &&
-							this.input[this.cursor + 5] === 'c' &&
-							this.input[this.cursor + 6] === 'h'
+							this.input[this.cursor + 2] === 'c' &&
+							this.input[this.cursor + 3] === 'r' &&
+							this.input[this.cursor + 4] === 'i' &&
+							this.input[this.cursor + 5] === 'p' &&
+							this.input[this.cursor + 6] === 't' &&
+							(this.input[this.cursor + 7] === '>' || this.is_whitespace(this.input[this.cursor + 7]))
 						) {
+							if (this.cursor > start_cursor) {
+								break;
+							}
+
 							for (let i = 0; i < 7; i++) {
 								this.advance_ch();
 							}
 
-							this.type = TokenType.switch_end;
-							return this.create_token(start_cursor, start_position);
+							this.type = TokenType.tag_start_js;
+							this.mode = LexerMode.tag;
+							this.tag_prev_mode = LexerMode.js;
+
+							break;
 						}
 
-						this.advance_ch();
-						this.type = TokenType.division;
-
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '+': {
-						this.advance_ch();
-						this.type = TokenType.plus;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '-': {
-						this.advance_ch();
-						this.type = TokenType.minus;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '*': {
-						this.advance_ch();
-						this.type = TokenType.multiplication;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '=': {
-						if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '=') {
-							this.advance_ch();
-							this.advance_ch();
-							this.type = TokenType.equal;
-
-							return this.create_token(start_cursor, start_position);
-						}
-
-						this.advance_ch();
-						this.type = TokenType.equal;
-
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '!': {
-						if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '=') {
-							this.advance_ch();
-							this.advance_ch();
-							this.type = TokenType.not_equal;
-
-							return this.create_token(start_cursor, start_position);
-						}
-
-						this.advance_ch();
-						this.type = TokenType.exclamation_mark;
-
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '>': {
-						if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '=') {
-							this.advance_ch();
-							this.advance_ch();
-							this.type = TokenType.greater_equal;
-
-							return this.create_token(start_cursor, start_position);
-						}
-
-						this.advance_ch();
-						this.type = TokenType.greater_than;
-
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '<': {
-						if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '=') {
-							this.advance_ch();
-							this.advance_ch();
-							this.type = TokenType.less_equal;
-
-							return this.create_token(start_cursor, start_position);
-						}
-
-						this.advance_ch();
-						this.type = TokenType.less_than;
-
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '|': {
-						if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '|') {
-							this.advance_ch();
-							this.advance_ch();
-							this.type = TokenType.logical_or;
-							return this.create_token(start_cursor, start_position);
-						}
-					}
-
-					case '&': {
-						if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '&') {
-							this.advance_ch();
-							this.advance_ch();
-							this.type = TokenType.logical_and;
-							return this.create_token(start_cursor, start_position);
-						}
-					}
-
-					case '(': {
-						this.advance_ch();
-						this.type = TokenType.l_parenthesis;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case ')': {
-						this.advance_ch();
-						this.type = TokenType.r_parenthesis;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '[': {
-						this.advance_ch();
-						this.type = TokenType.l_bracket;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case ']': {
-						this.advance_ch();
-						this.type = TokenType.r_bracket;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '_': {
-						this.advance_ch();
-						this.type = TokenType.underscore;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case ',': {
-						this.advance_ch();
-						this.type = TokenType.comma;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '.': {
-						this.advance_ch();
-						this.type = TokenType.period;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case ':': {
-						this.advance_ch();
-						this.type = TokenType.colon;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '?': {
-						this.advance_ch();
-						this.type = TokenType.question_mark;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					case '%': {
-						this.advance_ch();
-						this.type = TokenType.modulo;
-						return this.create_token(start_cursor, start_position);
-					}
-
-					default: {
-						// undefined
-						if (
-							this.cursor + 10 <= this.input.length &&
-							this.input[this.cursor] === 'u' &&
-							this.input[this.cursor + 1] === 'n' &&
-							this.input[this.cursor + 2] === 'd' &&
-							this.input[this.cursor + 3] === 'e' &&
-							this.input[this.cursor + 4] === 'f' &&
-							this.input[this.cursor + 5] === 'i' &&
-							this.input[this.cursor + 6] === 'n' &&
-							this.input[this.cursor + 7] === 'e' &&
-							this.input[this.cursor + 8] === 'd' &&
-							this.is_keyword_boundary(this.input[this.cursor + 9])
-						) {
-							for (let i = 0; i < 9; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.undefined;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// null
-						if (
-							this.cursor + 5 <= this.input.length &&
-							this.input[this.cursor] === 'n' &&
-							this.input[this.cursor + 1] === 'u' &&
-							this.input[this.cursor + 2] === 'l' &&
-							this.input[this.cursor + 3] === 'l' &&
-							this.is_keyword_boundary(this.input[this.cursor + 4])
-						) {
-							for (let i = 0; i < 4; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.null;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// true
-						if (
-							this.cursor + 5 <= this.input.length &&
-							this.input[this.cursor]     === 't' &&
-							this.input[this.cursor + 1] === 'r' &&
-							this.input[this.cursor + 2] === 'u' &&
-							this.input[this.cursor + 3] === 'e' &&
-							this.is_keyword_boundary(this.input[this.cursor + 4])
-						) {
-							for (let i = 0; i < 4; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.boolean;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// false
+						// <style> or <style ...>
 						if (
 							this.cursor + 6 <= this.input.length &&
-							this.input[this.cursor]     === 'f' &&
-							this.input[this.cursor + 1] === 'a' &&
-							this.input[this.cursor + 2] === 'l' &&
-							this.input[this.cursor + 3] === 's' &&
-							this.input[this.cursor + 4] === 'e' &&
-							this.is_keyword_boundary(this.input[this.cursor + 5])
-						) {
-							for (let i = 0; i < 5; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.boolean;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// use
-						if (
-							this.cursor + 4 <= this.input.length &&
-							this.input[this.cursor]     === 'u' &&
 							this.input[this.cursor + 1] === 's' &&
-							this.input[this.cursor + 2] === 'e' &&
-							this.is_keyword_boundary(this.input[this.cursor + 3])
+							this.input[this.cursor + 2] === 't' &&
+							this.input[this.cursor + 3] === 'y' &&
+							this.input[this.cursor + 4] === 'l' &&
+							this.input[this.cursor + 5] === 'e' &&
+							(this.input[this.cursor + 6] === '>' || this.is_whitespace(this.input[this.cursor + 6]))
 						) {
-							for (let i = 0; i < 4; i++) {
-								this.advance_ch();
+							if (this.cursor > start_cursor) {
+								break;
 							}
 
-							this.type = TokenType.use_start;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// slot
-						if (
-							this.cursor + 5 <= this.input.length &&
-							this.input[this.cursor]     === 's' &&
-							this.input[this.cursor + 1] === 'l' &&
-							this.input[this.cursor + 2] === 'o' &&
-							this.input[this.cursor + 3] === 't' &&
-							this.is_keyword_boundary(this.input[this.cursor + 4])
-						) {
-							for (let i = 0; i < 4; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.slot_start;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// for
-						if (
-							this.cursor + 4 <= this.input.length &&
-							this.input[this.cursor] === 'f' &&
-							this.input[this.cursor + 1] === 'o' &&
-							this.input[this.cursor + 2] === 'r' &&
-							this.is_keyword_boundary(this.input[this.cursor + 3])
-						) {
-							for (let i = 0; i < 3; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.for_start;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// in
-						if (
-							this.cursor + 3 <= this.input.length &&
-							this.input[this.cursor] === 'i' &&
-							this.input[this.cursor + 1] === 'n' &&
-							this.is_keyword_boundary(this.input[this.cursor + 2])
-						) {
-							for (let i = 0; i < 2; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.for_in;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// if
-						if (
-							this.cursor + 3 <= this.input.length &&
-							this.input[this.cursor] === 'i' &&
-							this.input[this.cursor + 1] === 'f' &&
-							this.is_keyword_boundary(this.input[this.cursor + 2])
-						) {
-							for (let i = 0; i < 2; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.if_start;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// else
-						if (
-							this.cursor + 5 <= this.input.length &&
-							this.input[this.cursor] === 'e' &&
-							this.input[this.cursor + 1] === 'l' &&
-							this.input[this.cursor + 2] === 's' &&
-							this.input[this.cursor + 3] === 'e' &&
-							this.is_keyword_boundary(this.input[this.cursor + 4])
-						) {
-							for (let i = 0; i < 4; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.else_start;
-							return this.create_token(start_cursor, start_position);
-						}
-
-						// switch
-						if (
-							this.cursor + 7 <= this.input.length &&
-							this.input[this.cursor] === 's' &&
-							this.input[this.cursor + 1] === 'w' &&
-							this.input[this.cursor + 2] === 'i' &&
-							this.input[this.cursor + 3] === 't' &&
-							this.input[this.cursor + 4] === 'c' &&
-							this.input[this.cursor + 5] === 'h' &&
-							this.is_keyword_boundary(this.input[this.cursor + 6])
-						) {
 							for (let i = 0; i < 6; i++) {
 								this.advance_ch();
 							}
 
-							this.type = TokenType.switch_start;
-							return this.create_token(start_cursor, start_position);
+							this.type = TokenType.tag_start_css;
+							this.mode = LexerMode.tag;
+							this.tag_prev_mode = LexerMode.css;
+
+							break;
+						}
+					}
+
+					if (ch === '{') {
+						if (this.cursor > start_cursor) {
+							break;
 						}
 
-						// case
-						if (
-							this.cursor + 5 <= this.input.length &&
-							this.input[this.cursor] === 'c' &&
-							this.input[this.cursor + 1] === 'a' &&
-							this.input[this.cursor + 2] === 's' &&
-							this.input[this.cursor + 3] === 'e' &&
-							this.is_keyword_boundary(this.input[this.cursor + 4])
-						) {
-							for (let i = 0; i < 4; i++) {
-								this.advance_ch();
+						this.prev_mode = this.mode;
+						this.mode = LexerMode.expr;
+
+						break;
+					}
+				}
+
+				if (this.mode === LexerMode.css) {
+					this.type = TokenType.text_css;
+
+					// </style>
+					if (
+						ch === '<' &&
+						this.cursor + 8 <= this.input.length &&
+						this.input[this.cursor + 1] === '/' &&
+						this.input[this.cursor + 2] === 's' &&
+						this.input[this.cursor + 3] === 't' &&
+						this.input[this.cursor + 4] === 'y' &&
+						this.input[this.cursor + 5] === 'l' &&
+						this.input[this.cursor + 6] === 'e' &&
+						this.input[this.cursor + 7] === '>'
+					) {
+						if (this.cursor > start_cursor) {
+							break;
+						}
+
+						this.type = TokenType.tag_end_css;
+
+						for (let i = 0; i < 8; i++) {
+							this.advance_ch();
+						}
+
+						this.mode = LexerMode.text;
+
+						break;
+					}
+
+					// @{}
+					if (ch === '@') {
+						if (this.cursor + 1 < this.input.length && this.input[this.cursor + 1] === '{') {
+							if (this.cursor > start_cursor) {
+								break;
 							}
 
-							this.type = TokenType.case_start;
-							return this.create_token(start_cursor, start_position);
+							this.prev_mode = this.mode;
+							this.mode = LexerMode.expr;
+
+							break;
+						}
+					}
+				}
+
+				if (this.mode === LexerMode.js) {
+					this.type = TokenType.text_js;
+
+					// </script>
+					if (
+						ch === '<' &&
+						this.cursor + 9 <= this.input.length &&
+						this.input[this.cursor + 1] === '/' &&
+						this.input[this.cursor + 2] === 's' &&
+						this.input[this.cursor + 3] === 'c' &&
+						this.input[this.cursor + 4] === 'r' &&
+						this.input[this.cursor + 5] === 'i' &&
+						this.input[this.cursor + 6] === 'p' &&
+						this.input[this.cursor + 7] === 't' &&
+						this.input[this.cursor + 8] === '>'
+					) {
+						if (this.cursor > start_cursor) {
+							break;
 						}
 
-						// default
-						if (
-							this.cursor + 8 <= this.input.length &&
-							this.input[this.cursor] === 'd' &&
-							this.input[this.cursor + 1] === 'e' &&
-							this.input[this.cursor + 2] === 'f' &&
-							this.input[this.cursor + 3] === 'a' &&
-							this.input[this.cursor + 4] === 'u' &&
-							this.input[this.cursor + 5] === 'l' &&
-							this.input[this.cursor + 6] === 't' &&
-							this.is_keyword_boundary(this.input[this.cursor + 7])
-						) {
-							for (let i = 0; i < 7; i++) {
-								this.advance_ch();
+						this.type = TokenType.tag_end_js;
+
+						for (let i = 0; i < 9; i++) {
+							this.advance_ch();
+						}
+
+						this.mode = LexerMode.text;
+
+						break;
+					}
+
+					// @{}
+					if (ch === '@') {
+						if (this.cursor + 1 < this.input.length && this.input[this.cursor + 1] === '{') {
+							if (this.cursor > start_cursor) {
+								break;
 							}
 
-							this.type = TokenType.default_start;
-							return this.create_token(start_cursor, start_position);
+							this.prev_mode = this.mode;
+							this.mode = LexerMode.expr;
+
+							break;
+						}
+					}
+				}
+
+				if (this.mode === LexerMode.tag) {
+					this.type = TokenType.text;
+
+					if (ch === '>') {
+						if (this.cursor > start_cursor) {
+							break;
 						}
 
-						// insert
-						if (
-							this.cursor + 8 <= this.input.length &&
-							this.input[this.cursor] === 'i' &&
-							this.input[this.cursor + 1] === 'n' &&
-							this.input[this.cursor + 2] === 's' &&
-							this.input[this.cursor + 3] === 'e' &&
-							this.input[this.cursor + 4] === 'r' &&
-							this.input[this.cursor + 5] === 't' &&
-							this.is_keyword_boundary(this.input[this.cursor + 6])
-						) {
-							for (let i = 0; i < 7; i++) {
+						this.advance_ch();
+
+						this.type = TokenType.tag_start_end;
+						this.mode = this.tag_prev_mode;
+
+						return this.create_token(start_cursor);
+					}
+
+					if (ch === '{') {
+						if (this.cursor > start_cursor) {
+							break;
+						}
+
+						this.prev_mode = this.mode;
+						this.mode = LexerMode.expr;
+
+						break;
+					}
+				}
+
+				if (this.mode === LexerMode.expr) {
+					if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+						this.advance_ch();
+						start_cursor = this.cursor;
+						continue inner;
+					}
+
+					switch (ch) {
+						case '@': {
+							if (this.cursor + 1 < this.input.length && this.input[this.cursor + 1] === '{') {
 								this.advance_ch();
+								this.advance_ch();
+								this.type = TokenType.expr_start;
+								return this.create_token(start_cursor);
 							}
 
-							this.type = TokenType.insert_start;
-							return this.create_token(start_cursor, start_position);
+							break;
 						}
 
-						// recurse
-						if (
-							this.cursor + 8 <= this.input.length &&
-							this.input[this.cursor]     === 'r' &&
-							this.input[this.cursor + 1] === 'e' &&
-							this.input[this.cursor + 2] === 'c' &&
-							this.input[this.cursor + 3] === 'u' &&
-							this.input[this.cursor + 4] === 'r' &&
-							this.input[this.cursor + 5] === 's' &&
-							this.input[this.cursor + 6] === 'e' &&
-							this.is_keyword_boundary(this.input[this.cursor + 7])
-						) {
-							for (let i = 0; i < 7; i++) {
-								this.advance_ch();
-							}
-
-							this.type = TokenType.recurse_start;
-							return this.create_token(start_cursor, start_position);
+						case '{': {
+							this.advance_ch();
+							this.type = TokenType.expr_start;
+							return this.create_token(start_cursor);
 						}
 
-						// identifiers
-						if (this.is_alpha(ch)) {
-							while (true) {
-								const c = this.current_ch();
-
-								if (!c || !this.is_alphanumeric(c)) {
-									break;
-								}
-
-								this.advance_ch();
-							}
-
-							this.type = TokenType.identifier;
-							return this.create_token(start_cursor, start_position);
+						case '}': {
+							this.advance_ch();
+							this.type = TokenType.expr_end;
+							this.mode = this.prev_mode;
+							return this.create_token(start_cursor);
 						}
 
-						// numbers
-						if (this.is_numeric(ch)) {
-							this.type = TokenType.integer;
-
-							while (true) {
-								const ch = this.current_ch();
-
-								if (!ch) {
-									break;
-								}
-
-								if (this.is_numeric(ch)) {
+						case '/': {
+							// {/use}
+							if (
+								this.cursor + 4 <= this.input.length &&
+								this.input[this.cursor + 1] === 'u' &&
+								this.input[this.cursor + 2] === 's' &&
+								this.input[this.cursor + 3] === 'e'
+							) {
+								for (let i = 0; i < 4; i++) {
 									this.advance_ch();
-								} else if (ch === '.' && this.type === TokenType.integer) {
-									if (this.cursor + 1 < this.input.length && this.is_numeric(this.input[this.cursor + 1])) {
-										this.type = TokenType.float;
+								}
+
+								this.type = TokenType.use_end;
+								return this.create_token(start_cursor);
+							}
+
+							// {/slot}
+							if (
+								this.cursor + 5 <= this.input.length &&
+								this.input[this.cursor + 1] === 's' &&
+								this.input[this.cursor + 2] === 'l' &&
+								this.input[this.cursor + 3] === 'o' &&
+								this.input[this.cursor + 4] === 't'
+							) {
+								for (let i = 0; i < 5; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.slot_end;
+								return this.create_token(start_cursor);
+							}
+
+							// {/for}
+							if (
+								this.cursor + 4 <= this.input.length &&
+								this.input[this.cursor + 1] === 'f' &&
+								this.input[this.cursor + 2] === 'o' &&
+								this.input[this.cursor + 3] === 'r'
+							) {
+								for (let i = 0; i < 4; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.for_end;
+								return this.create_token(start_cursor);
+							}
+
+							// {/if}
+							if (
+								this.cursor + 3 <= this.input.length &&
+								this.input[this.cursor + 1] === 'i' &&
+								this.input[this.cursor + 2] === 'f'
+							) {
+								for (let i = 0; i < 3; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.if_end;
+								return this.create_token(start_cursor);
+							}
+
+							// {/switch}
+							if (
+								this.cursor + 7 <= this.input.length &&
+								this.input[this.cursor + 1] === 's' &&
+								this.input[this.cursor + 2] === 'w' &&
+								this.input[this.cursor + 3] === 'i' &&
+								this.input[this.cursor + 4] === 't' &&
+								this.input[this.cursor + 5] === 'c' &&
+								this.input[this.cursor + 6] === 'h'
+							) {
+								for (let i = 0; i < 7; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.switch_end;
+								return this.create_token(start_cursor);
+							}
+
+							this.advance_ch();
+							this.type = TokenType.division;
+
+							return this.create_token(start_cursor);
+						}
+
+						case '+': {
+							this.advance_ch();
+							this.type = TokenType.plus;
+							return this.create_token(start_cursor);
+						}
+
+						case '-': {
+							this.advance_ch();
+							this.type = TokenType.minus;
+							return this.create_token(start_cursor);
+						}
+
+						case '*': {
+							this.advance_ch();
+							this.type = TokenType.multiplication;
+							return this.create_token(start_cursor);
+						}
+
+						case '=': {
+							if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '=') {
+								this.advance_ch();
+								this.advance_ch();
+								this.type = TokenType.equal;
+
+								return this.create_token(start_cursor);
+							}
+
+							this.advance_ch();
+							this.type = TokenType.equal;
+
+							return this.create_token(start_cursor);
+						}
+
+						case '!': {
+							if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '=') {
+								this.advance_ch();
+								this.advance_ch();
+								this.type = TokenType.not_equal;
+
+								return this.create_token(start_cursor);
+							}
+
+							this.advance_ch();
+							this.type = TokenType.exclamation_mark;
+
+							return this.create_token(start_cursor);
+						}
+
+						case '>': {
+							if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '=') {
+								this.advance_ch();
+								this.advance_ch();
+								this.type = TokenType.greater_equal;
+
+								return this.create_token(start_cursor);
+							}
+
+							this.advance_ch();
+							this.type = TokenType.greater_than;
+
+							return this.create_token(start_cursor);
+						}
+
+						case '<': {
+							if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '=') {
+								this.advance_ch();
+								this.advance_ch();
+								this.type = TokenType.less_equal;
+
+								return this.create_token(start_cursor);
+							}
+
+							this.advance_ch();
+							this.type = TokenType.less_than;
+
+							return this.create_token(start_cursor);
+						}
+
+						case '|': {
+							if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '|') {
+								this.advance_ch();
+								this.advance_ch();
+								this.type = TokenType.logical_or;
+								return this.create_token(start_cursor);
+							}
+						}
+
+						case '&': {
+							if (this.cursor + 2 <= this.input.length && this.input[this.cursor + 1] === '&') {
+								this.advance_ch();
+								this.advance_ch();
+								this.type = TokenType.logical_and;
+								return this.create_token(start_cursor);
+							}
+						}
+
+						case '(': {
+							this.advance_ch();
+							this.type = TokenType.l_parenthesis;
+							return this.create_token(start_cursor);
+						}
+
+						case ')': {
+							this.advance_ch();
+							this.type = TokenType.r_parenthesis;
+							return this.create_token(start_cursor);
+						}
+
+						case '[': {
+							this.advance_ch();
+							this.type = TokenType.l_bracket;
+							return this.create_token(start_cursor);
+						}
+
+						case ']': {
+							this.advance_ch();
+							this.type = TokenType.r_bracket;
+							return this.create_token(start_cursor);
+						}
+
+						case '_': {
+							this.advance_ch();
+							this.type = TokenType.underscore;
+							return this.create_token(start_cursor);
+						}
+
+						case ',': {
+							this.advance_ch();
+							this.type = TokenType.comma;
+							return this.create_token(start_cursor);
+						}
+
+						case '.': {
+							this.advance_ch();
+							this.type = TokenType.period;
+							return this.create_token(start_cursor);
+						}
+
+						case ':': {
+							this.advance_ch();
+							this.type = TokenType.colon;
+							return this.create_token(start_cursor);
+						}
+
+						case '?': {
+							this.advance_ch();
+							this.type = TokenType.question_mark;
+							return this.create_token(start_cursor);
+						}
+
+						case '%': {
+							this.advance_ch();
+							this.type = TokenType.modulo;
+							return this.create_token(start_cursor);
+						}
+
+						default: {
+							// undefined
+							if (
+								this.cursor + 10 <= this.input.length &&
+								this.input[this.cursor] === 'u' &&
+								this.input[this.cursor + 1] === 'n' &&
+								this.input[this.cursor + 2] === 'd' &&
+								this.input[this.cursor + 3] === 'e' &&
+								this.input[this.cursor + 4] === 'f' &&
+								this.input[this.cursor + 5] === 'i' &&
+								this.input[this.cursor + 6] === 'n' &&
+								this.input[this.cursor + 7] === 'e' &&
+								this.input[this.cursor + 8] === 'd' &&
+								this.is_keyword_boundary(this.input[this.cursor + 9])
+							) {
+								for (let i = 0; i < 9; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.undefined;
+								return this.create_token(start_cursor);
+							}
+
+							// null
+							if (
+								this.cursor + 5 <= this.input.length &&
+								this.input[this.cursor] === 'n' &&
+								this.input[this.cursor + 1] === 'u' &&
+								this.input[this.cursor + 2] === 'l' &&
+								this.input[this.cursor + 3] === 'l' &&
+								this.is_keyword_boundary(this.input[this.cursor + 4])
+							) {
+								for (let i = 0; i < 4; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.null;
+								return this.create_token(start_cursor);
+							}
+
+							// true
+							if (
+								this.cursor + 5 <= this.input.length &&
+								this.input[this.cursor]     === 't' &&
+								this.input[this.cursor + 1] === 'r' &&
+								this.input[this.cursor + 2] === 'u' &&
+								this.input[this.cursor + 3] === 'e' &&
+								this.is_keyword_boundary(this.input[this.cursor + 4])
+							) {
+								for (let i = 0; i < 4; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.boolean;
+								return this.create_token(start_cursor);
+							}
+
+							// false
+							if (
+								this.cursor + 6 <= this.input.length &&
+								this.input[this.cursor]     === 'f' &&
+								this.input[this.cursor + 1] === 'a' &&
+								this.input[this.cursor + 2] === 'l' &&
+								this.input[this.cursor + 3] === 's' &&
+								this.input[this.cursor + 4] === 'e' &&
+								this.is_keyword_boundary(this.input[this.cursor + 5])
+							) {
+								for (let i = 0; i < 5; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.boolean;
+								return this.create_token(start_cursor);
+							}
+
+							// use
+							if (
+								this.cursor + 4 <= this.input.length &&
+								this.input[this.cursor]     === 'u' &&
+								this.input[this.cursor + 1] === 's' &&
+								this.input[this.cursor + 2] === 'e' &&
+								this.is_keyword_boundary(this.input[this.cursor + 3])
+							) {
+								for (let i = 0; i < 4; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.use_start;
+								return this.create_token(start_cursor);
+							}
+
+							// slot
+							if (
+								this.cursor + 5 <= this.input.length &&
+								this.input[this.cursor]     === 's' &&
+								this.input[this.cursor + 1] === 'l' &&
+								this.input[this.cursor + 2] === 'o' &&
+								this.input[this.cursor + 3] === 't' &&
+								this.is_keyword_boundary(this.input[this.cursor + 4])
+							) {
+								for (let i = 0; i < 4; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.slot_start;
+								return this.create_token(start_cursor);
+							}
+
+							// for
+							if (
+								this.cursor + 4 <= this.input.length &&
+								this.input[this.cursor] === 'f' &&
+								this.input[this.cursor + 1] === 'o' &&
+								this.input[this.cursor + 2] === 'r' &&
+								this.is_keyword_boundary(this.input[this.cursor + 3])
+							) {
+								for (let i = 0; i < 3; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.for_start;
+								return this.create_token(start_cursor);
+							}
+
+							// in
+							if (
+								this.cursor + 3 <= this.input.length &&
+								this.input[this.cursor] === 'i' &&
+								this.input[this.cursor + 1] === 'n' &&
+								this.is_keyword_boundary(this.input[this.cursor + 2])
+							) {
+								for (let i = 0; i < 2; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.for_in;
+								return this.create_token(start_cursor);
+							}
+
+							// if
+							if (
+								this.cursor + 3 <= this.input.length &&
+								this.input[this.cursor] === 'i' &&
+								this.input[this.cursor + 1] === 'f' &&
+								this.is_keyword_boundary(this.input[this.cursor + 2])
+							) {
+								for (let i = 0; i < 2; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.if_start;
+								return this.create_token(start_cursor);
+							}
+
+							// else
+							if (
+								this.cursor + 5 <= this.input.length &&
+								this.input[this.cursor] === 'e' &&
+								this.input[this.cursor + 1] === 'l' &&
+								this.input[this.cursor + 2] === 's' &&
+								this.input[this.cursor + 3] === 'e' &&
+								this.is_keyword_boundary(this.input[this.cursor + 4])
+							) {
+								for (let i = 0; i < 4; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.else_start;
+								return this.create_token(start_cursor);
+							}
+
+							// switch
+							if (
+								this.cursor + 7 <= this.input.length &&
+								this.input[this.cursor] === 's' &&
+								this.input[this.cursor + 1] === 'w' &&
+								this.input[this.cursor + 2] === 'i' &&
+								this.input[this.cursor + 3] === 't' &&
+								this.input[this.cursor + 4] === 'c' &&
+								this.input[this.cursor + 5] === 'h' &&
+								this.is_keyword_boundary(this.input[this.cursor + 6])
+							) {
+								for (let i = 0; i < 6; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.switch_start;
+								return this.create_token(start_cursor);
+							}
+
+							// case
+							if (
+								this.cursor + 5 <= this.input.length &&
+								this.input[this.cursor] === 'c' &&
+								this.input[this.cursor + 1] === 'a' &&
+								this.input[this.cursor + 2] === 's' &&
+								this.input[this.cursor + 3] === 'e' &&
+								this.is_keyword_boundary(this.input[this.cursor + 4])
+							) {
+								for (let i = 0; i < 4; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.case_start;
+								return this.create_token(start_cursor);
+							}
+
+							// default
+							if (
+								this.cursor + 8 <= this.input.length &&
+								this.input[this.cursor] === 'd' &&
+								this.input[this.cursor + 1] === 'e' &&
+								this.input[this.cursor + 2] === 'f' &&
+								this.input[this.cursor + 3] === 'a' &&
+								this.input[this.cursor + 4] === 'u' &&
+								this.input[this.cursor + 5] === 'l' &&
+								this.input[this.cursor + 6] === 't' &&
+								this.is_keyword_boundary(this.input[this.cursor + 7])
+							) {
+								for (let i = 0; i < 7; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.default_start;
+								return this.create_token(start_cursor);
+							}
+
+							// insert
+							if (
+								this.cursor + 8 <= this.input.length &&
+								this.input[this.cursor] === 'i' &&
+								this.input[this.cursor + 1] === 'n' &&
+								this.input[this.cursor + 2] === 's' &&
+								this.input[this.cursor + 3] === 'e' &&
+								this.input[this.cursor + 4] === 'r' &&
+								this.input[this.cursor + 5] === 't' &&
+								this.is_keyword_boundary(this.input[this.cursor + 6])
+							) {
+								for (let i = 0; i < 7; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.insert_start;
+								return this.create_token(start_cursor);
+							}
+
+							// recurse
+							if (
+								this.cursor + 8 <= this.input.length &&
+								this.input[this.cursor]     === 'r' &&
+								this.input[this.cursor + 1] === 'e' &&
+								this.input[this.cursor + 2] === 'c' &&
+								this.input[this.cursor + 3] === 'u' &&
+								this.input[this.cursor + 4] === 'r' &&
+								this.input[this.cursor + 5] === 's' &&
+								this.input[this.cursor + 6] === 'e' &&
+								this.is_keyword_boundary(this.input[this.cursor + 7])
+							) {
+								for (let i = 0; i < 7; i++) {
+									this.advance_ch();
+								}
+
+								this.type = TokenType.recurse_start;
+								return this.create_token(start_cursor);
+							}
+
+							// identifiers
+							if (this.is_alpha(ch)) {
+								while (true) {
+									const c = this.current_ch();
+
+									if (!c || !this.is_alphanumeric(c)) {
+										break;
+									}
+
+									this.advance_ch();
+								}
+
+								this.type = TokenType.identifier;
+								return this.create_token(start_cursor);
+							}
+
+							// numbers
+							if (this.is_numeric(ch)) {
+								this.type = TokenType.integer;
+
+								while (true) {
+									const ch = this.current_ch();
+
+									if (!ch) {
+										break;
+									}
+
+									if (this.is_numeric(ch)) {
 										this.advance_ch();
+									} else if (ch === '.' && this.type === TokenType.integer) {
+										if (this.cursor + 1 < this.input.length && this.is_numeric(this.input[this.cursor + 1])) {
+											this.type = TokenType.float;
+											this.advance_ch();
+										} else {
+											break;
+										}
 									} else {
 										break;
 									}
-								} else {
-									break;
 								}
+
+								return this.create_token(start_cursor);
 							}
 
-							return this.create_token(start_cursor, start_position);
-						}
+							// strings
+							if (ch === '\'' || ch === '"') {
+								const quote = ch;
 
-						// strings
-						if (ch === '\'' || ch === '"') {
-							const quote = ch;
+								this.advance_ch();
 
-							this.advance_ch();
+								while (true) {
+									const ch = this.current_ch();
 
-							while (true) {
-								const ch = this.current_ch();
+									if (!ch) {
+										break;
+									}
 
-								if (!ch) {
-									break;
-								}
+									if (ch === quote) {
+										this.advance_ch();
+										break;
+									}
 
-								if (ch === quote) {
-									this.advance_ch();
-									break;
-								}
+									if (ch === '\\') {
+										this.advance_ch();
 
-								if (ch === '\\') {
-									this.advance_ch();
-
-									if (this.cursor < this.input.length) {
+										if (this.cursor < this.input.length) {
+											this.advance_ch();
+										}
+									} else {
 										this.advance_ch();
 									}
-								} else {
-									this.advance_ch();
 								}
+
+								this.type = TokenType.string;
+								return this.create_token(start_cursor);
 							}
 
-							this.type = TokenType.string;
-							return this.create_token(start_cursor, start_position);
+							throw new Error(`Misplaced character "${ch}" (${this.line}:${this.column})`);
 						}
-
-						const { line, column } = start_position;
-						throw new Error(`Misplaced character ${ch} (${line}:${column})`);
 					}
 				}
+
+				this.advance_ch();
 			}
 
-			this.advance_ch();
+			if (this.type === TokenType.text) {
+				let end_cursor = this.cursor;
+
+				while (end_cursor > start_cursor) {
+					const last = this.input[end_cursor - 1];
+
+					if (last !== '\t' && last !== '\n' && last !== '\r') {
+						break;
+					}
+
+					end_cursor--;
+				}
+
+				if (end_cursor === start_cursor) {
+					continue outer;
+				}
+
+				return this.create_token(start_cursor, end_cursor);
+			}
+
+			return this.create_token(start_cursor);
 		}
-
-		const token_value = this.input.slice(start_cursor, this.cursor);
-
-		if (token_value.length === 0) {
-			return this.tokenize_lexeme();
-		}
-
-		return this.create_token(start_cursor, start_position);
 	}
 
 	tokenize(): Token[] {
@@ -1421,6 +1434,7 @@ export class Lexer {
 
 		while (true) {
 			const token = this.tokenize_lexeme();
+
 			tokens.push(token);
 
 			if (token.type === TokenType.eof) {
@@ -2584,13 +2598,13 @@ export class Renderer {
 	private render_css(node: CSS): string {
 		const attributes = this.render_node(node.attributes);
 		const content = this.render_node(node.body);
-		return `<style ${attributes}>${content}</style>`
+		return `<style${attributes}>${content}</style>`
 	}
 
 	private render_js(node: JS): string {
 		const attributes = this.render_node(node.attributes);
 		const content = this.render_node(node.body);
-		return `<script ${attributes}>${content}</script>`
+		return `<script${attributes}>${content}</script>`
 	}
 
 	private render_if_block(node: If): string {
@@ -2658,7 +2672,7 @@ export class Renderer {
 				}
 
 				for (let i = 0; i < loop_number; i++) {
-					this.context[node.iterator] = i;
+					this.context[node.iterator] = i + 1;
 
 					if (node.index) {
 						this.context[node.index as string] = i;
