@@ -16,21 +16,21 @@ export class TestSuite {
 
 	assert_equal<T>(actual: T, expected: T, message?: string): void {
 		if (actual !== expected) {
-			const msg = message || `Expected ${expected}, got ${actual}`;
+			const msg = message || `Expected “${expected}”, got “${actual}”`;
 			throw new Error(msg);
 		}
 	}
 
 	assert_null(value: any, message?: string): void {
 		if (value !== null) {
-			const msg = message || `Expected null, got ${value}`;
+			const msg = message || `Expected null, got “${value}”`;
 			throw new Error(msg);
 		}
 	}
 
 	assert_not_null(value: any, message?: string): void {
 		if (value === null || value === undefined) {
-			const msg = message || `Expected non-null value, got ${value}`;
+			const msg = message || `Expected non-null value, got “${value}”`;
 			throw new Error(msg);
 		}
 	}
