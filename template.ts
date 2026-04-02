@@ -485,6 +485,14 @@ export class Lexer {
 		this.tag_prev_mode = LexerMode.text;
 	}
 
+	private throw(type: 'unknown_character') {
+		switch (type) {
+			case 'unknown_character': {
+				throw new Error(`Syntax error: Unknown character "${this.input[this.cursor]}" (${this.line}:${this.column})`);
+			}
+		}
+	}
+
 	private is_whitespace(ch: string): boolean {
 		return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
 	}
@@ -1397,7 +1405,7 @@ export class Lexer {
 								return this.create_token(start_cursor);
 							}
 
-							throw new Error(`Misplaced character "${ch}" (${this.line}:${this.column})`);
+							this.throw('unknown_character');
 						}
 					}
 				}
@@ -1479,6 +1487,25 @@ export class Parser {
 		return this.tokens[this.cursor];
 	}
 
+	private throw(type: 'unknown_token' | 'unexpected_token' | 'unexpected_eof'): never {
+		const current_token = this.current_token();
+		const { line, column } = current_token.position;
+
+		switch (type) {
+			case 'unknown_token': {
+				throw new Error(`Parse error: Unknown token ${current_token.value} (${line}:${column})`);
+			}
+
+			case 'unexpected_token': {
+				throw new Error(`Parse error: Unexpected token ${current_token.value} (${line}:${column})`);
+			}
+
+			case 'unexpected_eof': {
+				throw new Error(`Parse error: Unexpected end of file (${line}:${column})`);
+			}
+		}
+	}
+
 	private peek_token(): Token | null {
 		if (this.cursor + 1 >= this.tokens.length) {
 			return null;
@@ -1499,13 +1526,11 @@ export class Parser {
 		const current = this.current_token();
 
 		if (current.type === TokenType.eof) {
-			const { line, column } = current.position;
-			throw new Error(`Unexpected end of file (${line}:${column})`);
+			this.throw('unexpected_eof');
 		}
 
 		if (current.type !== expected_type) {
-			const { line, column } = current.position;
-			throw new Error(`Unexpected token ${current.value} (${line}:${column})`);
+			this.throw('unexpected_token');
 		}
 
 		this.cursor += 1;
@@ -1756,8 +1781,7 @@ export class Parser {
 					break;
 				}
 			} else if (current.type === TokenType.eof) {
-				const { line, column } = current.position;
-				throw new Error(`Unexpected end of file (${line}:${column})`);
+				this.throw('unexpected_eof');
 			} else {
 				this.advance_token();
 			}
@@ -1910,8 +1934,7 @@ export class Parser {
 			} else if (current.type === TokenType.slot_start) {
 				slot_nodes.push(this.parse_slot_block());
 			} else if (current.type === TokenType.eof) {
-				const { line, column } = current.position;
-				throw new Error(`Unexpected end of file (${line}:${column})`);
+				this.throw('unexpected_eof');
 			} else {
 				this.advance_token();
 			}
@@ -2164,8 +2187,7 @@ export class Parser {
 			}
 
 			default: {
-				const { line, column } = current.position;
-				throw new Error(`Unexpected token ${current.value} (${line}:${column})`);
+				this.throw('unexpected_token');
 			}
 		}
 	}
@@ -2389,8 +2411,7 @@ export class Parser {
 					}
 
 					case TokenType.eof: {
-						const { line, column } = current.position;
-						throw new Error(`Unexpected end of file (${line}:${column})`);
+						this.throw('unexpected_eof');
 					}
 
 					default: {
@@ -2400,13 +2421,11 @@ export class Parser {
 			}
 
 			case TokenType.eof: {
-				const { line, column } = current.position;
-				throw new Error(`Unexpected end of file (${line}:${column})`);
+				this.throw('unexpected_eof');
 			}
 
 			default: {
-				const { line, column } = current.position;
-				throw new Error(`Unknown token ${current.value} (${line}:${column})`);
+				this.throw('unknown_token');
 			}
 		}
 	}
@@ -2587,6 +2606,7 @@ export class Renderer {
 	}
 
 	private render_comment(_: Comment): string {
+		// @later -- add option to include comments?
 		return '';
 	}
 
@@ -2628,6 +2648,7 @@ export class Renderer {
 
 		try {
 			if (iterable === null || iterable === undefined) {
+				// @later -- warn about variable being not iterable;
 				return '';
 			}
 
@@ -2746,7 +2767,8 @@ export class Renderer {
 		const template = this.templates[node.template];
 
 		if (!template) {
-			throw new Error(`Template "${node.template}" not compiled`);
+			// @later -- warn about missing template
+			return '';
 		}
 
 		for (const block of node.slots) {
@@ -2789,7 +2811,8 @@ export class Renderer {
 		const template = this.templates[node.template];
 
 		if (!template) {
-			throw new Error(`Template "${node.template}" not compiled`);
+			// @later -- warn about missing template
+			return '';
 		}
 
 		const inserted = this.render_node(template.ast);
@@ -2820,7 +2843,8 @@ export class Renderer {
 		const template = this.templates[node.template];
 
 		if (!template) {
-			throw new Error(`Template "${node.template}" not compiled`);
+			// @later -- warn about missing template
+			return '';
 		}
 
 		this.recurse_depth++;
@@ -2952,6 +2976,18 @@ export class TemplateEngine {
 		}
 	}
 
+	private throw(type: 'cycle_detected' | 'template_missing', info: string) {
+		switch (type) {
+			case 'cycle_detected': {
+				throw new Error(`Compile error: Circular import loop at ${info}`);
+			}
+
+			case 'template_missing': {
+				throw new Error(`Compile error: Template "${info}" has not been compiled`);
+			}
+		}
+	}
+
 	compile(template_name: string, content: string): Template {
 		const lexer    = new Lexer(content);
 		const tokens   = lexer.tokenize();
@@ -2994,7 +3030,7 @@ export class TemplateEngine {
 		const template = this.templates[name];
 
 		if (!template) {
-			throw new Error(`Template "${name}" not compiled`);
+			this.throw('template_missing', name);
 		}
 
 		const renderer = new Renderer(template, this.templates, Object.assign(this.options.context, context));
@@ -3023,7 +3059,7 @@ export class TemplateEngine {
 
 				cycle.push(template_name);
 
-				throw new Error(`Found import cycle: ${cycle.join(' → ')}`);
+				this.throw('cycle_detected', cycle.join(' → '));
 			}
 
 			current_import_path.push(template_name);
