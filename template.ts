@@ -497,12 +497,8 @@ export class Lexer {
 		return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
 	}
 
-	private is_keyword_boundary(ch: string): boolean {
-		return this.is_whitespace(ch) || ch === '}' || ch == ']'; // kind of flaky?
-	}
-
 	private is_alpha(ch: string): boolean {
-		return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_' || ch === '$'; // allow dash?
+		return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_' || ch === '$';
 	}
 
 	private is_numeric(ch: string): boolean {
@@ -1075,7 +1071,7 @@ export class Lexer {
 								this.input[this.cursor + 6] === 'n' &&
 								this.input[this.cursor + 7] === 'e' &&
 								this.input[this.cursor + 8] === 'd' &&
-								this.is_keyword_boundary(this.input[this.cursor + 9])
+								!this.is_alphanumeric(this.input[this.cursor + 9])
 							) {
 								for (let i = 0; i < 9; i++) {
 									this.advance_ch();
@@ -1092,7 +1088,7 @@ export class Lexer {
 								this.input[this.cursor + 1] === 'u' &&
 								this.input[this.cursor + 2] === 'l' &&
 								this.input[this.cursor + 3] === 'l' &&
-								this.is_keyword_boundary(this.input[this.cursor + 4])
+								!this.is_alphanumeric(this.input[this.cursor + 4])
 							) {
 								for (let i = 0; i < 4; i++) {
 									this.advance_ch();
@@ -1109,7 +1105,7 @@ export class Lexer {
 								this.input[this.cursor + 1] === 'r' &&
 								this.input[this.cursor + 2] === 'u' &&
 								this.input[this.cursor + 3] === 'e' &&
-								this.is_keyword_boundary(this.input[this.cursor + 4])
+								!this.is_alphanumeric(this.input[this.cursor + 4])
 							) {
 								for (let i = 0; i < 4; i++) {
 									this.advance_ch();
@@ -1127,7 +1123,7 @@ export class Lexer {
 								this.input[this.cursor + 2] === 'l' &&
 								this.input[this.cursor + 3] === 's' &&
 								this.input[this.cursor + 4] === 'e' &&
-								this.is_keyword_boundary(this.input[this.cursor + 5])
+								!this.is_alphanumeric(this.input[this.cursor + 5])
 							) {
 								for (let i = 0; i < 5; i++) {
 									this.advance_ch();
@@ -1143,7 +1139,7 @@ export class Lexer {
 								this.input[this.cursor]     === 'u' &&
 								this.input[this.cursor + 1] === 's' &&
 								this.input[this.cursor + 2] === 'e' &&
-								this.is_keyword_boundary(this.input[this.cursor + 3])
+								!this.is_alphanumeric(this.input[this.cursor + 3])
 							) {
 								for (let i = 0; i < 4; i++) {
 									this.advance_ch();
@@ -1160,7 +1156,7 @@ export class Lexer {
 								this.input[this.cursor + 1] === 'l' &&
 								this.input[this.cursor + 2] === 'o' &&
 								this.input[this.cursor + 3] === 't' &&
-								this.is_keyword_boundary(this.input[this.cursor + 4])
+								!this.is_alphanumeric(this.input[this.cursor + 4])
 							) {
 								for (let i = 0; i < 4; i++) {
 									this.advance_ch();
@@ -1176,7 +1172,7 @@ export class Lexer {
 								this.input[this.cursor] === 'f' &&
 								this.input[this.cursor + 1] === 'o' &&
 								this.input[this.cursor + 2] === 'r' &&
-								this.is_keyword_boundary(this.input[this.cursor + 3])
+								!this.is_alphanumeric(this.input[this.cursor + 3])
 							) {
 								for (let i = 0; i < 3; i++) {
 									this.advance_ch();
@@ -1191,7 +1187,7 @@ export class Lexer {
 								this.cursor + 3 <= this.input.length &&
 								this.input[this.cursor] === 'i' &&
 								this.input[this.cursor + 1] === 'n' &&
-								this.is_keyword_boundary(this.input[this.cursor + 2])
+								!this.is_alphanumeric(this.input[this.cursor + 2])
 							) {
 								for (let i = 0; i < 2; i++) {
 									this.advance_ch();
@@ -1206,7 +1202,7 @@ export class Lexer {
 								this.cursor + 3 <= this.input.length &&
 								this.input[this.cursor] === 'i' &&
 								this.input[this.cursor + 1] === 'f' &&
-								this.is_keyword_boundary(this.input[this.cursor + 2])
+								!this.is_alphanumeric(this.input[this.cursor + 2])
 							) {
 								for (let i = 0; i < 2; i++) {
 									this.advance_ch();
@@ -1223,7 +1219,7 @@ export class Lexer {
 								this.input[this.cursor + 1] === 'l' &&
 								this.input[this.cursor + 2] === 's' &&
 								this.input[this.cursor + 3] === 'e' &&
-								this.is_keyword_boundary(this.input[this.cursor + 4])
+								!this.is_alphanumeric(this.input[this.cursor + 4])
 							) {
 								for (let i = 0; i < 4; i++) {
 									this.advance_ch();
@@ -1242,7 +1238,7 @@ export class Lexer {
 								this.input[this.cursor + 3] === 't' &&
 								this.input[this.cursor + 4] === 'c' &&
 								this.input[this.cursor + 5] === 'h' &&
-								this.is_keyword_boundary(this.input[this.cursor + 6])
+								!this.is_alphanumeric(this.input[this.cursor + 6])
 							) {
 								for (let i = 0; i < 6; i++) {
 									this.advance_ch();
@@ -1259,7 +1255,7 @@ export class Lexer {
 								this.input[this.cursor + 1] === 'a' &&
 								this.input[this.cursor + 2] === 's' &&
 								this.input[this.cursor + 3] === 'e' &&
-								this.is_keyword_boundary(this.input[this.cursor + 4])
+								!this.is_alphanumeric(this.input[this.cursor + 4])
 							) {
 								for (let i = 0; i < 4; i++) {
 									this.advance_ch();
@@ -1279,7 +1275,7 @@ export class Lexer {
 								this.input[this.cursor + 4] === 'u' &&
 								this.input[this.cursor + 5] === 'l' &&
 								this.input[this.cursor + 6] === 't' &&
-								this.is_keyword_boundary(this.input[this.cursor + 7])
+								!this.is_alphanumeric(this.input[this.cursor + 7])
 							) {
 								for (let i = 0; i < 7; i++) {
 									this.advance_ch();
@@ -1298,7 +1294,7 @@ export class Lexer {
 								this.input[this.cursor + 3] === 'e' &&
 								this.input[this.cursor + 4] === 'r' &&
 								this.input[this.cursor + 5] === 't' &&
-								this.is_keyword_boundary(this.input[this.cursor + 6])
+								!this.is_alphanumeric(this.input[this.cursor + 6])
 							) {
 								for (let i = 0; i < 7; i++) {
 									this.advance_ch();
@@ -1318,7 +1314,7 @@ export class Lexer {
 								this.input[this.cursor + 4] === 'r' &&
 								this.input[this.cursor + 5] === 's' &&
 								this.input[this.cursor + 6] === 'e' &&
-								this.is_keyword_boundary(this.input[this.cursor + 7])
+								!this.is_alphanumeric(this.input[this.cursor + 7])
 							) {
 								for (let i = 0; i < 7; i++) {
 									this.advance_ch();

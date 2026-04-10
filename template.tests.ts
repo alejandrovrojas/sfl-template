@@ -611,4 +611,32 @@ tests.run('whitespace: space between blocks', () => {
 	tests.assert_equal(result, "--<div></div><div></div><div></div><div></div><div>5</div>--")
 });
 
+tests.run('values: value types in key:value lists', () => {
+	const engine = new TemplateEngine();
+
+	const comp = engine.compile('comp', `
+		|{is_true == true ? 'is_true == true' : 'bug'}
+		|{is_false == false ? 'is_false == false' : 'bug'}
+		|{is_null == null ? 'is_null == null' : 'bug'}
+		|{is_string == "hello" ? 'is_string == "hello"' : 'bug'}
+		|{is_number == 123 ? 'is_string == 123' : 'bug'}
+	`);
+
+	const template = engine.compile('_', `
+		{
+			insert "comp" (
+				is_true: true,
+				is_false: false,
+				is_null: null,
+				is_string: "hello",
+				is_number: 123
+			)
+		}
+	`);
+
+	const result = engine.render('_');
+
+	tests.assert_equal(result, '|is_true == true|is_false == false|is_null == null|is_string == "hello"|is_string == 123')
+});
+
 tests.print_results();
