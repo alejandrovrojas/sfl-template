@@ -3029,7 +3029,7 @@ export class TemplateEngine {
 			this.throw('template_missing', name);
 		}
 
-		const renderer = new Renderer(template, this.templates, Object.assign(this.options.context, context));
+		const renderer = new Renderer(template, this.templates, Object.assign({}, this.options.context, context));
 		const result = renderer.render();
 
 		return result;
