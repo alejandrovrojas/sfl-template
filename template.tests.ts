@@ -639,4 +639,24 @@ tests.run('values: value types in key:value lists', () => {
 	tests.assert_equal(result, '|is_true == true|is_false == false|is_null == null|is_string == "hello"|is_string == 123')
 });
 
+tests.run('templates: comments', () => {
+	const engine = new TemplateEngine({ debug: true });
+
+	const comp = engine.compile('comp', `// comment 1
+		// comment 2
+		<div data-url="http://test.com"> // comment 3
+			// comment 4
+			// // comment 5
+		</div>
+	`);
+
+	const template = engine.compile('_', `
+		{insert "comp"}
+	`);
+
+	const result = engine.render('_');
+
+	tests.assert_equal(result, '<div data-url="http://test.com"> </div>')
+});
+
 tests.print_results();

@@ -465,24 +465,26 @@ export type TemplateEngineOptions = {
 }
 
 export class Lexer {
-	input:         string;
-	cursor:        number;
-	line:          number;
-	column:        number;
-	type:          TokenType;
-	mode:          LexerMode;
-	prev_mode:     LexerMode;
-	tag_prev_mode: LexerMode;
+	input:          string;
+	cursor:         number;
+	cursor_newline: number;
+	line:           number;
+	column:         number;
+	type:           TokenType;
+	mode:           LexerMode;
+	prev_mode:      LexerMode;
+	tag_prev_mode:  LexerMode;
 
 	constructor(input: string) {
-		this.input         = input;
-		this.cursor        = 0;
-		this.line          = 1;
-		this.column        = 1;
-		this.type          = TokenType.eof;
-		this.mode          = LexerMode.text;
-		this.prev_mode     = LexerMode.text;
-		this.tag_prev_mode = LexerMode.text;
+		this.input          = input;
+		this.cursor         = 0;
+		this.cursor_newline = 0;
+		this.line           = 1;
+		this.column         = 1;
+		this.type           = TokenType.eof;
+		this.mode           = LexerMode.text;
+		this.prev_mode      = LexerMode.text;
+		this.tag_prev_mode  = LexerMode.text;
 	}
 
 	private throw(type: 'unknown_character') {
@@ -525,6 +527,10 @@ export class Lexer {
 		if (ch === '\n') {
 			this.line += 1;
 			this.column = 1;
+			this.cursor_newline = this.cursor;
+		} else if (ch === '\r') {
+			this.column = 1;
+			this.cursor_newline = this.cursor;
 		} else {
 			this.column += 1;
 		}
@@ -565,12 +571,6 @@ export class Lexer {
 			inner: while (this.cursor < this.input.length) {
 				const ch = this.input[this.cursor];
 
-				if (ch === '/') {
-					if (this.cursor + 1 < this.input.length && this.input[this.cursor + 1] === '/') {
-						this.mode = LexerMode.comment;
-					}
-				}
-
 				if (this.mode === LexerMode.comment) {
 					this.type = TokenType.comment;
 
@@ -599,6 +599,35 @@ export class Lexer {
 						}
 
 						continue inner;
+					}
+
+					if (ch === '/' && this.cursor + 1 < this.input.length && this.input[this.cursor + 1] === '/') {
+						let leading_whitespace_only = true;
+
+						for (let i = this.cursor_newline; i < this.cursor; i++) {
+							const prev = this.input[i];
+
+							if (prev !== ' ' && prev !== '\t') {
+								leading_whitespace_only = false;
+								break;
+							}
+						}
+
+						if (leading_whitespace_only || this.cursor === start_cursor) {
+							if (this.cursor > start_cursor) {
+								break;
+							}
+
+							start_cursor = this.cursor;
+							this.mode = LexerMode.comment;
+							continue inner;
+						}
+
+						const prev_ch = this.cursor > 0 ? this.input[this.cursor - 1] : null;
+
+						if (prev_ch === ' ' || prev_ch === '\t') {
+							break;
+						}
 					}
 
 					if (ch === '<') {
