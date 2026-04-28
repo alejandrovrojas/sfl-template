@@ -193,7 +193,6 @@ export enum TokenType {
 	r_parenthesis          = "r_parenthesis",
 	l_bracket              = "l_bracket",
 	r_bracket              = "r_bracket",
-	underscore             = "underscore",
 	comma                  = "comma",
 	period                 = "period",
 	colon                  = "colon",
@@ -1056,12 +1055,6 @@ export class Lexer {
 						case ']': {
 							this.advance_ch();
 							this.type = TokenType.r_bracket;
-							return this.create_token(start_cursor);
-						}
-
-						case '_': {
-							this.advance_ch();
-							this.type = TokenType.underscore;
 							return this.create_token(start_cursor);
 						}
 
