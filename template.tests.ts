@@ -636,11 +636,11 @@ tests.run('values: value types in key:value lists', () => {
 
 	const result = engine.render('_');
 
-	tests.assert_equal(result, '|is_true == true|is_false == false|is_null == null|is_string == "hello"|is_string == 123')
+	tests.assert_equal(result, '|is_true == true|is_false == false|is_null == null|is_string == &quot;hello&quot;|is_string == 123')
 });
 
 tests.run('templates: comments', () => {
-	const engine = new TemplateEngine({ debug: true });
+	const engine = new TemplateEngine();
 
 	const comp = engine.compile('comp', `// comment 1
 		// comment 2
@@ -657,6 +657,17 @@ tests.run('templates: comments', () => {
 	const result = engine.render('_');
 
 	tests.assert_equal(result, '<div data-url="http://test.com"> </div>')
+});
+
+tests.run('templates: escaped text', () => {
+	const engine = new TemplateEngine();
+
+	const result = engine.run('_', `
+		1) {#code}
+		2) {code}
+	`, { code: '<script>console.log("test")</script>' });
+
+	tests.assert_equal(result, '1) <script>console.log("test")</script>2) &lt;script&gt;console.log(&quot;test&quot;)&lt;/script&gt;')
 });
 
 tests.print_results();

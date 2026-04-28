@@ -199,6 +199,7 @@ export enum TokenType {
 	colon                  = "colon",
 	exclamation_mark       = "exclamation_mark",
 	question_mark          = "question_mark",
+	hash                   = "hash",
 	modulo                 = "modulo",
 	boolean                = "boolean",
 	string                 = "string",
@@ -237,6 +238,7 @@ enum NodeType {
 	expression_binary      = "expression_binary",
 	expression_unary       = "expression_unary",
 	expression_member      = "expression_member",
+	expression_raw         = "expression_raw",
 	identifier             = "identifier",
 	function_call          = "function_call",
 	argument_list          = "argument_list",
@@ -263,6 +265,7 @@ type Expression =
 	| ExpressionConditional
 	| ExpressionMember
 	| ExpressionUnary
+	| ExpressionRaw
 	| FunctionCall
 	| Identifier
 	| Literal;
@@ -412,6 +415,11 @@ type ExpressionUnary = {
 	type:       NodeType.expression_unary;
 	operator:   TokenType;
 	operand:    Expression;
+}
+
+type ExpressionRaw = {
+	type:     NodeType.expression_raw;
+	operand:  Expression;
 }
 
 type ExpressionMember = {
@@ -1078,6 +1086,12 @@ export class Lexer {
 						case '?': {
 							this.advance_ch();
 							this.type = TokenType.question_mark;
+							return this.create_token(start_cursor);
+						}
+
+						case '#': {
+							this.advance_ch();
+							this.type = TokenType.hash;
 							return this.create_token(start_cursor);
 						}
 
@@ -2166,6 +2180,17 @@ export class Parser {
 			};
 		}
 
+		if (token.type === TokenType.hash) {
+			this.advance_token();
+
+			const operand = this.parse_unary();
+
+			return {
+				type:    NodeType.expression_raw,
+				operand: operand,
+			};
+		}
+
 		return this.parse_primary();
 	}
 
@@ -2492,6 +2517,15 @@ export class Renderer {
 		this.context   = context;
 	}
 
+	private escape_html(input: string): string {
+		return input
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;');
+	}
+
 	private eval_literal(node: Literal): unknown {
 		return node.value;
 	}
@@ -2596,11 +2630,21 @@ export class Renderer {
 			}
 
 			case NodeType.expression_unary: {
-				const unary = node as ExpressionUnary;
-				const operand = this.eval_node(unary.operand);
-				if (unary.operator === TokenType.minus) return -(operand as number);
-				if (unary.operator === TokenType.exclamation_mark) return !operand;
+				const operand = this.eval_node(node.operand);
+
+				if (node.operator === TokenType.minus) {
+					return -(operand as number);
+				}
+
+				if (node.operator === TokenType.exclamation_mark) {
+					return !operand;
+				}
+
 				return null;
+			}
+
+			case NodeType.expression_raw: {
+				return this.eval_node(node.operand);
 			}
 
 			case NodeType.expression_binary: {
@@ -2620,7 +2664,6 @@ export class Renderer {
 			}
 
 			default: {
-				console.log('NI %s', node.type);
 				return null;
 			}
 		}
@@ -2898,13 +2941,15 @@ export class Renderer {
 	}
 
 	private render_content(node: Content): string {
+		const is_raw = node.type === NodeType.expression_raw;
 		const value = this.eval_node(node);
 
 		if (value === null || value === undefined) {
 			return '';
 		}
 
-		return String(value);
+		const string_value = String(value);
+		return is_raw ? string_value : this.escape_html(string_value);
 	}
 
 	private render_node(node: Content): string {
@@ -2967,6 +3012,7 @@ export class Renderer {
 			case NodeType.expression_unary:
 			case NodeType.expression_binary:
 			case NodeType.expression_conditional:
+			case NodeType.expression_raw:
 			case NodeType.literal_int:
 			case NodeType.literal_string:
 			case NodeType.literal_boolean:
